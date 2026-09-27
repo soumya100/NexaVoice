@@ -11,19 +11,55 @@ export class LinkPreviewService {
   private readonly logger = new StructuredLogger('LinkPreviewService');
 
   /**
-   * SSRF Protection: Checks if IP is internal, private, loopback, or link-local.
+   * SSRF Protection: Checks if IP or hostname is internal, private, loopback, or link-local.
    */
-  private isPrivateOrInternalIp(ip: string): boolean {
-    if (ip === '127.0.0.1' || ip === '::1' || ip === 'localhost') return true;
-    if (ip.startsWith('10.')) return true;
-    if (ip.startsWith('192.168.')) return true;
-    if (ip.startsWith('169.254.')) return true; // Link-local / AWS metadata 169.254.169.254
-    if (ip.startsWith('172.')) {
-      const parts = ip.split('.');
-      const second = parseInt(parts[1], 10);
-      if (second >= 16 && second <= 31) return true;
+  public isPrivateOrInternalIp(ip: string): boolean {
+    const normalized = ip.toLowerCase().trim();
+    if (
+      normalized === '127.0.0.1' ||
+      normalized === 'localhost' ||
+      normalized === '0.0.0.0' ||
+      normalized === '::1' ||
+      normalized === '::'
+    ) {
+      return true;
     }
-    if (ip.startsWith('fc') || ip.startsWith('fe80')) return true; // IPv6 local
+
+    // IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1)
+    if (normalized.startsWith('::ffff:')) {
+      return this.isPrivateOrInternalIp(normalized.substring(7));
+    }
+
+    // RFC 1918 Class A: 10.0.0.0/8
+    if (normalized.startsWith('10.')) return true;
+
+    // RFC 1918 Class C: 192.168.0.0/16
+    if (normalized.startsWith('192.168.')) return true;
+
+    // RFC 3927 Link-local / Cloud metadata: 169.254.0.0/16 (169.254.169.254)
+    if (normalized.startsWith('169.254.')) return true;
+
+    // RFC 1918 Class B: 172.16.0.0/12
+    if (normalized.startsWith('172.')) {
+      const parts = normalized.split('.');
+      if (parts.length >= 2) {
+        const second = parseInt(parts[1], 10);
+        if (second >= 16 && second <= 31) return true;
+      }
+    }
+
+    // RFC 4193 Unique Local IPv6 (fc00::/7) or RFC 4291 Link-Local IPv6 (fe80::/10)
+    if (
+      normalized.startsWith('fc') ||
+      normalized.startsWith('fd') ||
+      normalized.startsWith('fe8') ||
+      normalized.startsWith('fe9') ||
+      normalized.startsWith('fea') ||
+      normalized.startsWith('feb')
+    ) {
+      return true;
+    }
+
     return false;
   }
 

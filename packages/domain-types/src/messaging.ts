@@ -43,9 +43,13 @@ export enum MessageDeliveryStatus {
 }
 
 export enum AttachmentStatus {
-  CLEAN = 'CLEAN',
+  PENDING_UPLOAD = 'PENDING_UPLOAD',
   PENDING_SCAN = 'PENDING_SCAN',
+  CLEAN = 'CLEAN',
   QUARANTINED = 'QUARANTINED',
+  SCAN_FAILED = 'SCAN_FAILED',
+  FLAGGED = 'FLAGGED',
+  DELETED = 'DELETED',
   REJECTED = 'REJECTED',
 }
 

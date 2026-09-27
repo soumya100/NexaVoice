@@ -7,6 +7,7 @@ describe('ConversationsService', () => {
   let mockPrisma: any;
   let mockSecurityAudit: any;
   let mockContactsService: any;
+  let mockSignalingGateway: any;
 
   beforeEach(() => {
     mockSecurityAudit = {
@@ -31,15 +32,23 @@ describe('ConversationsService', () => {
       conversationParticipant: {
         findMany: jest.fn(),
         findUnique: jest.fn(),
+        findFirst: jest.fn(),
         create: jest.fn(),
+        update: jest.fn(),
         delete: jest.fn(),
       },
+    };
+
+    mockSignalingGateway = {
+      evictUserFromConversation: jest.fn(),
+      broadcastToConversation: jest.fn(),
     };
 
     service = new ConversationsService(
       mockPrisma,
       mockSecurityAudit,
       mockContactsService,
+      mockSignalingGateway,
     );
   });
 
@@ -200,6 +209,128 @@ describe('ConversationsService', () => {
       expect(group.participants.find((p) => p.userId === 'user-alice')?.conversationRole).toBe(
         ConversationRole.OWNER,
       );
+    });
+  });
+
+  describe('removeParticipant - Role-Based Moderation & Socket Room Eviction', () => {
+    it('1. MEMBER attempts to remove MEMBER -> DENIED (ForbiddenException)', async () => {
+      mockPrisma.conversation.findUnique.mockResolvedValue({
+        id: 'group-100',
+        participants: [
+          { userId: 'member-1', conversationRole: ConversationRole.MEMBER },
+          { userId: 'member-2', conversationRole: ConversationRole.MEMBER },
+        ],
+      });
+
+      await expect(
+        service.removeParticipant('member-1', {
+          conversationId: 'group-100',
+          userId: 'member-2',
+        }),
+      ).rejects.toThrow('Only owners and admins can remove other participants');
+    });
+
+    it('2. ADMIN removes MEMBER -> ALLOWED, triggers socket room eviction & event broadcast', async () => {
+      mockPrisma.conversation.findUnique.mockResolvedValue({
+        id: 'group-100',
+        participants: [
+          { userId: 'admin-1', conversationRole: ConversationRole.ADMIN },
+          { userId: 'member-bad', conversationRole: ConversationRole.MEMBER },
+        ],
+      });
+      mockPrisma.conversationParticipant.delete.mockResolvedValue({});
+
+      const result = await service.removeParticipant('admin-1', {
+        conversationId: 'group-100',
+        userId: 'member-bad',
+      });
+
+      expect(result).toBe(true);
+      expect(mockPrisma.conversationParticipant.delete).toHaveBeenCalledWith({
+        where: {
+          conversationId_userId: {
+            conversationId: 'group-100',
+            userId: 'member-bad',
+          },
+        },
+      });
+
+      // Verify immediate socket eviction and room broadcast
+      expect(mockSignalingGateway.evictUserFromConversation).toHaveBeenCalledWith(
+        'member-bad',
+        'group-100',
+      );
+      expect(mockSignalingGateway.broadcastToConversation).toHaveBeenCalledWith(
+        'group-100',
+        'conversation.participant.removed',
+        expect.objectContaining({
+          conversationId: 'group-100',
+          removedUserId: 'member-bad',
+        }),
+      );
+    });
+
+    it('3. OWNER removes ADMIN -> ALLOWED', async () => {
+      mockPrisma.conversation.findUnique.mockResolvedValue({
+        id: 'group-100',
+        participants: [
+          { userId: 'owner-1', conversationRole: ConversationRole.OWNER },
+          { userId: 'admin-1', conversationRole: ConversationRole.ADMIN },
+        ],
+      });
+      mockPrisma.conversationParticipant.delete.mockResolvedValue({});
+
+      const result = await service.removeParticipant('owner-1', {
+        conversationId: 'group-100',
+        userId: 'admin-1',
+      });
+
+      expect(result).toBe(true);
+      expect(mockSignalingGateway.evictUserFromConversation).toHaveBeenCalledWith('admin-1', 'group-100');
+    });
+
+    it('4. ADMIN attempts to remove OWNER -> DENIED', async () => {
+      mockPrisma.conversation.findUnique.mockResolvedValue({
+        id: 'group-100',
+        participants: [
+          { userId: 'admin-1', conversationRole: ConversationRole.ADMIN },
+          { userId: 'owner-1', conversationRole: ConversationRole.OWNER },
+        ],
+      });
+
+      await expect(
+        service.removeParticipant('admin-1', {
+          conversationId: 'group-100',
+          userId: 'owner-1',
+        }),
+      ).rejects.toThrow('Group owner cannot be removed');
+    });
+
+    it('5. OWNER leaves group -> triggers owner role transfer to remaining participant', async () => {
+      mockPrisma.conversation.findUnique.mockResolvedValue({
+        id: 'group-100',
+        participants: [
+          { userId: 'owner-1', conversationRole: ConversationRole.OWNER },
+          { userId: 'admin-successor', conversationRole: ConversationRole.ADMIN },
+        ],
+      });
+      mockPrisma.conversationParticipant.delete.mockResolvedValue({});
+      mockPrisma.conversationParticipant.findFirst.mockResolvedValue({
+        id: 'cp-successor',
+        userId: 'admin-successor',
+        conversationRole: ConversationRole.ADMIN,
+      });
+
+      const result = await service.removeParticipant('owner-1', {
+        conversationId: 'group-100',
+        userId: 'owner-1',
+      });
+
+      expect(result).toBe(true);
+      expect(mockPrisma.conversationParticipant.update).toHaveBeenCalledWith({
+        where: { id: 'cp-successor' },
+        data: { conversationRole: ConversationRole.OWNER },
+      });
     });
   });
 });

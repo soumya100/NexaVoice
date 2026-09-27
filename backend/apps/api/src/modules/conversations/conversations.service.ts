@@ -19,6 +19,7 @@ import {
   CreateGroupConversationInput,
   UpdateConversationInput,
 } from './conversations.types';
+import { SignalingGateway } from '../realtime/signaling.gateway';
 
 @Injectable()
 export class ConversationsService {
@@ -26,6 +27,7 @@ export class ConversationsService {
     private readonly prisma: PrismaService,
     private readonly securityAudit: SecurityAuditService,
     private readonly contactsService: ContactsService,
+    private readonly signalingGateway: SignalingGateway,
   ) {}
 
   /**
@@ -412,6 +414,17 @@ export class ConversationsService {
       targetId: input.conversationId,
       result: 'SUCCESS',
       metadata: { removedUserId: input.userId },
+    });
+
+    // Evict active sockets from the conversation room immediately
+    this.signalingGateway.evictUserFromConversation(input.userId, input.conversationId);
+
+    // Notify remaining participants in the conversation room
+    this.signalingGateway.broadcastToConversation(input.conversationId, 'conversation.participant.removed', {
+      conversationId: input.conversationId,
+      removedUserId: input.userId,
+      callerId,
+      timestamp: new Date().toISOString(),
     });
 
     return true;

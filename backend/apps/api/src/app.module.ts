@@ -13,6 +13,7 @@ import { HealthModule } from './modules/health/health.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
+import { AttachmentsModule } from './modules/attachments/attachments.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { MessagingModule } from './modules/messaging/messaging.module';
     ContactsModule,
     ConversationsModule,
     MessagingModule,
+    AttachmentsModule,
     RealtimeModule,
     HealthModule,
     GraphQLModule.forRootAsync<ApolloDriverConfig>({

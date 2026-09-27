@@ -6,7 +6,7 @@ import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { SecurityAuditService } from '../security/security-audit.service';
 import { TokenGenerator } from '../../common/security/token-generator';
 
-describe('SessionService', () => {
+describe('SessionService - Multi-Hop Refresh Token Family & Reuse Detection', () => {
   let service: SessionService;
   let mockPrisma: any;
   let mockSecurityAudit: Partial<SecurityAuditService>;
@@ -25,11 +25,34 @@ describe('SessionService', () => {
         findUnique: jest.fn(),
         update: jest.fn().mockResolvedValue({ id: 'session-123' }),
         updateMany: jest.fn().mockResolvedValue({ count: 2 }),
-        findMany: jest.fn().mockResolvedValue([]),
+        findMany: jest.fn().mockResolvedValue([{ id: 'session-123' }]),
+      },
+      refreshTokenFamily: {
+        create: jest.fn().mockResolvedValue({ id: 'family-1', sessionId: 'session-123' }),
+        findUnique: jest.fn(),
+        update: jest.fn().mockResolvedValue({ id: 'family-1', isRevoked: true }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      refreshToken: {
+        create: jest.fn().mockImplementation(({ data }) =>
+          Promise.resolve({
+            id: 'token-' + Math.random(),
+            ...data,
+          }),
+        ),
+        findUnique: jest.fn(),
+        update: jest.fn().mockResolvedValue({ id: 'token-updated' }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       user: {
         update: jest.fn().mockResolvedValue({ id: 'user-1' }),
       },
+      $transaction: jest.fn().mockImplementation((arg) => {
+        if (typeof arg === 'function') {
+          return arg(mockPrisma);
+        }
+        return Promise.all(arg);
+      }),
     };
 
     mockSecurityAudit = {
@@ -52,7 +75,7 @@ describe('SessionService', () => {
     service = module.get<SessionService>(SessionService);
   });
 
-  it('should create a new session and return high-entropy refresh token', async () => {
+  it('1. should create a session and initialize RefreshTokenFamily and root RefreshToken', async () => {
     const res = await service.createSession({
       userId: 'user-1',
       deviceId: 'device-1',
@@ -60,66 +83,111 @@ describe('SessionService', () => {
 
     expect(res.sessionId).toBe('session-123');
     expect(res.rawRefreshToken).toBeDefined();
-    expect(res.rawRefreshToken.length).toBe(64); // 32 bytes hex
-    expect(mockPrisma.session.create).toHaveBeenCalled();
+    expect(res.rawRefreshToken.length).toBe(64);
+    expect(mockPrisma.session.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: 'user-1',
+          tokenFamilies: expect.objectContaining({
+            create: expect.objectContaining({
+              tokens: expect.any(Object),
+            }),
+          }),
+        }),
+      }),
+    );
     expect(mockSecurityAudit.logEvent).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'SESSION_CREATED' }),
     );
   });
 
-  it('should successfully rotate an active refresh token', async () => {
-    const rawOldToken = 'valid-active-refresh-token';
-    const oldHash = TokenGenerator.hashToken(rawOldToken);
+  it('2. should successfully rotate T1 -> T2', async () => {
+    const rawT1 = 'token-t1-secret-string';
+    const hashT1 = TokenGenerator.hashToken(rawT1);
 
-    mockPrisma.session.findFirst.mockResolvedValue(null); // No reuse detected
-    mockPrisma.session.findUnique.mockResolvedValue({
-      id: 'session-123',
-      userId: 'user-1',
-      tokenHash: oldHash,
+    mockPrisma.refreshToken.findUnique.mockResolvedValue({
+      id: 'rt-1',
+      familyId: 'family-1',
+      tokenHash: hashT1,
+      usedAt: null,
+      replacedByTokenId: null,
       isRevoked: false,
       expiresAt: new Date(Date.now() + 100000),
+      family: {
+        id: 'family-1',
+        sessionId: 'session-123',
+        isRevoked: false,
+        session: {
+          id: 'session-123',
+          userId: 'user-1',
+          isRevoked: false,
+        },
+      },
     });
 
-    const res = await service.rotateRefreshToken(rawOldToken);
+    const res = await service.rotateRefreshToken(rawT1);
 
     expect(res.sessionId).toBe('session-123');
     expect(res.rawRefreshToken).toBeDefined();
-    expect(res.rawRefreshToken).not.toBe(rawOldToken);
-    expect(mockPrisma.session.update).toHaveBeenCalledWith(
+    expect(res.rawRefreshToken).not.toBe(rawT1);
+    expect(mockPrisma.refreshToken.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'session-123' },
+        where: { id: 'rt-1' },
         data: expect.objectContaining({
-          replacedByTokenHash: oldHash,
+          usedAt: expect.any(Date),
         }),
       }),
     );
   });
 
-  it('should DETECT REUSE and immediately REVOKE session when a replaced token is re-sent', async () => {
-    const stolenOldToken = 'stolen-previously-rotated-token';
-    const stolenHash = TokenGenerator.hashToken(stolenOldToken);
+  it('3. should DETECT REUSE when T1 is reused after rotation to T2', async () => {
+    const rawT1 = 'token-t1-secret-string';
+    const hashT1 = TokenGenerator.hashToken(rawT1);
 
-    // findFirst matches on replacedByTokenHash -> Reuse attack!
-    mockPrisma.session.findFirst.mockResolvedValue({
-      id: 'compromised-session-999',
-      userId: 'victim-user-1',
-      replacedByTokenHash: stolenHash,
+    // T1 is already used!
+    mockPrisma.refreshToken.findUnique.mockResolvedValue({
+      id: 'rt-1',
+      familyId: 'family-1',
+      tokenHash: hashT1,
+      usedAt: new Date(Date.now() - 10000), // ALREADY USED
+      replacedByTokenId: 'rt-2',
+      isRevoked: false,
+      expiresAt: new Date(Date.now() + 100000),
+      family: {
+        id: 'family-1',
+        sessionId: 'session-123',
+        isRevoked: false,
+        session: {
+          id: 'session-123',
+          userId: 'user-1',
+          isRevoked: false,
+        },
+      },
     });
 
-    await expect(service.rotateRefreshToken(stolenOldToken)).rejects.toThrow(
-      UnauthorizedException,
+    await expect(service.rotateRefreshToken(rawT1)).rejects.toThrow(
+      'Security incident: refresh token reuse detected. Session revoked.',
     );
 
-    // Verifies session revocation in DB
-    expect(mockPrisma.session.update).toHaveBeenCalledWith({
-      where: { id: 'compromised-session-999' },
-      data: expect.objectContaining({
-        isRevoked: true,
-        revocationReason: 'REFRESH_TOKEN_REUSE_DETECTED',
+    // Verify family and session were revoked
+    expect(mockPrisma.refreshTokenFamily.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'family-1' },
+        data: expect.objectContaining({
+          isRevoked: true,
+          revocationReason: 'REFRESH_TOKEN_REUSE_DETECTED',
+        }),
       }),
-    });
-
-    // Verifies security audit incident event was recorded
+    );
+    expect(mockPrisma.session.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'session-123' },
+        data: expect.objectContaining({
+          isRevoked: true,
+          revocationReason: 'REFRESH_TOKEN_REUSE_DETECTED',
+        }),
+      }),
+    );
     expect(mockSecurityAudit.logEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'REFRESH_TOKEN_REUSE_DETECTED',
@@ -128,7 +196,95 @@ describe('SessionService', () => {
     );
   });
 
-  it('should revoke all user sessions and increment user tokenVersion', async () => {
+  it('4. MULTI-HOP TEST: should DETECT REUSE when T1 is reused after T1 -> T2 -> T3', async () => {
+    const rawT1 = 'token-t1-ancient-ancestor';
+    const hashT1 = TokenGenerator.hashToken(rawT1);
+
+    // T1 was used long ago and replaced by T2, which was replaced by T3
+    mockPrisma.refreshToken.findUnique.mockResolvedValue({
+      id: 'rt-1',
+      familyId: 'family-1',
+      tokenHash: hashT1,
+      usedAt: new Date(Date.now() - 50000),
+      replacedByTokenId: 'rt-2',
+      isRevoked: false,
+      expiresAt: new Date(Date.now() + 100000),
+      family: {
+        id: 'family-1',
+        sessionId: 'session-123',
+        isRevoked: false,
+        session: {
+          id: 'session-123',
+          userId: 'user-1',
+          isRevoked: false,
+        },
+      },
+    });
+
+    await expect(service.rotateRefreshToken(rawT1)).rejects.toThrow(UnauthorizedException);
+    expect(mockPrisma.refreshTokenFamily.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'family-1' },
+        data: expect.objectContaining({ isRevoked: true }),
+      }),
+    );
+  });
+
+  it('5. MULTI-HOP TEST: should DETECT REUSE when T2 is reused after T1 -> T2 -> T3', async () => {
+    const rawT2 = 'token-t2-intermediate-ancestor';
+    const hashT2 = TokenGenerator.hashToken(rawT2);
+
+    mockPrisma.refreshToken.findUnique.mockResolvedValue({
+      id: 'rt-2',
+      familyId: 'family-1',
+      tokenHash: hashT2,
+      usedAt: new Date(Date.now() - 25000),
+      replacedByTokenId: 'rt-3',
+      isRevoked: false,
+      expiresAt: new Date(Date.now() + 100000),
+      family: {
+        id: 'family-1',
+        sessionId: 'session-123',
+        isRevoked: false,
+        session: {
+          id: 'session-123',
+          userId: 'user-1',
+          isRevoked: false,
+        },
+      },
+    });
+
+    await expect(service.rotateRefreshToken(rawT2)).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('6. should reject expired refresh token', async () => {
+    const rawT = 'token-expired';
+    const hashT = TokenGenerator.hashToken(rawT);
+
+    mockPrisma.refreshToken.findUnique.mockResolvedValue({
+      id: 'rt-exp',
+      familyId: 'family-1',
+      tokenHash: hashT,
+      usedAt: null,
+      replacedByTokenId: null,
+      isRevoked: false,
+      expiresAt: new Date(Date.now() - 1000), // Expired!
+      family: {
+        id: 'family-1',
+        sessionId: 'session-123',
+        isRevoked: false,
+        session: {
+          id: 'session-123',
+          userId: 'user-1',
+          isRevoked: false,
+        },
+      },
+    });
+
+    await expect(service.rotateRefreshToken(rawT)).rejects.toThrow('Refresh token has expired');
+  });
+
+  it('7. should revoke all user sessions and increment user tokenVersion', async () => {
     await service.revokeAllSessions('user-1', 'USER_PASSWORD_CHANGED');
 
     expect(mockPrisma.session.updateMany).toHaveBeenCalledWith({

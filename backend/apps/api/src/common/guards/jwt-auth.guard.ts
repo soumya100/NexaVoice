@@ -46,38 +46,35 @@ export class JwtAuthGuard implements CanActivate {
       const secret = this.configService.get<string>('jwt.secret', 'dev-secret-key-32-chars-long-minimum!');
       const payload = await this.jwtService.verifyAsync<AuthTokenPayload>(token, { secret });
 
-      // Verify user account state and tokenVersion
-      let accountState = AccountState.ACTIVE;
-      let roles: string[] = payload.roles || [];
-      let permissions: string[] = [];
-
-      if (this.prisma.isDatabaseConnected()) {
-        const user = await this.prisma.user.findUnique({
-          where: { id: payload.sub },
-          select: {
-            id: true,
-            accountState: true,
-            tokenVersion: true,
-          },
-        });
-
-        if (!user) {
-          throw new UnauthorizedException('User account no longer exists');
-        }
-
-        if (user.tokenVersion !== payload.tokenVersion) {
-          throw new UnauthorizedException('Session token was invalidated; please log in again.');
-        }
-
-        accountState = user.accountState as AccountState;
-        if (accountState === AccountState.SUSPENDED || accountState === AccountState.LOCKED) {
-          throw new UnauthorizedException(`Account is ${accountState}; access denied.`);
-        }
-
-        const userPerms = await this.rbacService.getUserPermissions(payload.sub);
-        roles = userPerms.roles;
-        permissions = userPerms.permissions;
+      if (!this.prisma.isDatabaseConnected()) {
+        throw new UnauthorizedException('Authentication service degraded: session authority unreachable');
       }
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        select: {
+          id: true,
+          accountState: true,
+          tokenVersion: true,
+        },
+      });
+
+      if (!user) {
+        throw new UnauthorizedException('User account no longer exists');
+      }
+
+      if (user.tokenVersion !== payload.tokenVersion) {
+        throw new UnauthorizedException('Session token was invalidated; please log in again.');
+      }
+
+      const accountState = user.accountState as AccountState;
+      if (accountState === AccountState.SUSPENDED || accountState === AccountState.LOCKED) {
+        throw new UnauthorizedException(`Account is ${accountState}; access denied.`);
+      }
+
+      const userPerms = await this.rbacService.getUserPermissions(payload.sub);
+      const roles = userPerms.roles;
+      const permissions = userPerms.permissions;
 
       const subject: AuthorizationSubject = {
         id: payload.sub,

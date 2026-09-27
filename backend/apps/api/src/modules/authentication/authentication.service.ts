@@ -197,8 +197,8 @@ export class AuthenticationService {
       throw new UnauthorizedException('Account is temporarily locked due to failed login attempts. Please try again later.');
     }
 
-    // 3. Check Account State
-    if (user.accountState === AccountState.SUSPENDED || user.accountState === AccountState.LOCKED) {
+    // 3. Check Account State (Reject SUSPENDED, LOCKED, DEACTIVATED, DELETED)
+    if (user.accountState !== AccountState.ACTIVE) {
       await this.securityAudit.logEvent({
         actorId: user.id,
         action: 'LOGIN_REJECTED_ACCOUNT_STATE',
@@ -206,7 +206,7 @@ export class AuthenticationService {
         reason: `Account state is ${user.accountState}`,
         ipAddress: metadata?.ipAddress,
       });
-      throw new UnauthorizedException(`Account is ${user.accountState}. Please contact support.`);
+      throw new UnauthorizedException(`Account is ${user.accountState}; access denied.`);
     }
 
     // 4. Verify Password

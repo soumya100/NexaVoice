@@ -70,7 +70,10 @@ enum MessageDeliveryStatus {
 
 enum AttachmentStatus {
   PENDING_UPLOAD
+  PENDING_SCAN
   CLEAN
+  QUARANTINED
+  SCAN_FAILED
   FLAGGED
   DELETED
 }
@@ -419,10 +422,42 @@ model Session {
 
   user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  tokenFamilies RefreshTokenFamily[]
 
   @@index([userId])
   @@index([tokenHash])
   @@index([replacedByTokenHash])
+}
+
+model RefreshTokenFamily {
+  id               String         @id @default(uuid())
+  sessionId        String
+  isRevoked        Boolean        @default(false)
+  revokedAt        DateTime?
+  revocationReason String?
+  createdAt        DateTime       @default(now())
+
+  session          Session        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  tokens           RefreshToken[]
+
+  @@index([sessionId])
+}
+
+model RefreshToken {
+  id                String              @id @default(uuid())
+  familyId          String
+  tokenHash         String              @unique
+  issuedAt          DateTime            @default(now())
+  expiresAt         DateTime
+  usedAt            DateTime?
+  replacedByTokenId String?
+  revokedAt         DateTime?
+  isRevoked         Boolean             @default(false)
+
+  family            RefreshTokenFamily  @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@index([familyId])
+  @@index([tokenHash])
 }
 
 model Device {
@@ -572,8 +607,10 @@ model SecurityEvent {
   ipAddress     String?
   userAgent     String?
   correlationId String?
-  metadataJson  String              @default("{}")
-  createdAt     DateTime            @default(now())
+  metadataJson      String              @default("{}")
+  eventHash         String              @default("")
+  previousEventHash String              @default("")
+  createdAt         DateTime            @default(now())
 
   actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
@@ -582,3 +619,24 @@ model SecurityEvent {
   @@index([createdAt])
   @@index([result])
 }
+
+model OutboxEvent {
+  id            String    @id @default(uuid())
+  eventType     String
+  aggregateType String
+  aggregateId   String
+  payloadJson   String
+  status        String    @default("PENDING") // PENDING, PROCESSED, FAILED, DEAD_LETTER
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(5)
+  lastError     String?
+  correlationId String?
+  availableAt   DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  processedAt   DateTime?
+
+  @@index([status, availableAt])
+  @@index([aggregateType, aggregateId])
+  @@index([createdAt])
+}
+

@@ -28,6 +28,8 @@ import {
   SendMessageInput,
 } from './messaging.types';
 
+import { OutboxWorker } from './outbox.worker';
+
 @Injectable()
 export class MessagingService {
   private readonly logger = new StructuredLogger('MessagingService');
@@ -38,6 +40,7 @@ export class MessagingService {
     private readonly contactsService: ContactsService,
     private readonly attachmentsService: AttachmentsService,
     private readonly signalingGateway: SignalingGateway,
+    private readonly outboxWorker: OutboxWorker,
   ) {}
 
   /**
@@ -160,6 +163,18 @@ export class MessagingService {
         });
       }
 
+      // 5. Transactional Outbox: Atomically persist outbox event with message
+      await tx.outboxEvent.create({
+        data: {
+          eventType: 'conversation.message.created',
+          aggregateType: 'Conversation',
+          aggregateId: input.conversationId,
+          payloadJson: JSON.stringify(this.mapMessage(message)),
+          status: 'PENDING',
+          correlationId: message.id,
+        },
+      });
+
       return message;
     });
 
@@ -179,12 +194,13 @@ export class MessagingService {
 
     const mapped = this.mapMessage(finalMessage);
 
-    // 5. Broadcast realtime message event to authorized conversation room
-    this.signalingGateway.broadcastToConversation(
-      input.conversationId,
-      'conversation.message.created',
-      mapped,
-    );
+    // 6. Asynchronously drain pending outbox events (outbox worker guarantees reliable delivery)
+    this.outboxWorker.drainPendingEvents().catch((err) => {
+      this.logger.warn({
+        event: 'outbox_drain_after_send_failed',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
     return mapped;
   }

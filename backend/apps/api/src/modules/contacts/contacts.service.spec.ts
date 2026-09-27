@@ -196,4 +196,102 @@ describe('ContactsService', () => {
       expect(results[0].username).toBe('charlie');
     });
   });
+
+  describe('syncAddressBook - Privacy-Preserving Hash Matching', () => {
+    const crypto = require('crypto');
+
+    it('1. should match contacts by SHA-256 hashed email and phone', async () => {
+      const email = 'alice@example.com';
+      const phone = '+15551234567';
+
+      const emailHash = crypto.createHash('sha256').update(email).digest('hex');
+      const phoneHash = crypto.createHash('sha256').update(phone).digest('hex');
+
+      mockPrisma.user.findMany.mockResolvedValue([
+        {
+          id: 'user-alice',
+          nexaVoiceId: 'NV-ALICE',
+          username: 'alice',
+          displayName: 'Alice Cooper',
+          email: '  Alice@Example.com ', // Needs normalization
+          phone: '+1 (555) 123-4567',   // Needs normalization
+          privacySettings: {
+            discoverableByEmail: true,
+            discoverableByPhone: true,
+          },
+          blockedUsers: [],
+        },
+      ]);
+
+      const results = await service.syncAddressBook('caller-id', {
+        entries: [
+          { identifierHash: emailHash },
+          { identifierHash: phoneHash },
+          { identifierHash: 'unmatched-hash-12345' },
+        ],
+      });
+
+      expect(results.length).toBeGreaterThanOrEqual(1);
+      expect(results[0]?.matchedUser?.username).toBe('alice');
+      // Verify raw contacts are NEVER stored in database
+      expect(mockPrisma.user.create).toBeUndefined();
+    });
+
+    it('2. should NOT match user if discovery is disabled in privacy settings', async () => {
+      const email = 'secret@example.com';
+      const emailHash = crypto.createHash('sha256').update(email).digest('hex');
+
+      // User has discovery turned off
+      mockPrisma.user.findMany.mockResolvedValue([]);
+
+      const results = await service.syncAddressBook('caller-id', {
+        entries: [{ identifierHash: emailHash }],
+      });
+
+      expect(results).toHaveLength(0);
+    });
+
+    it('3. should NOT match user if user has blocked the caller', async () => {
+      const email = 'enemy@example.com';
+      const emailHash = crypto.createHash('sha256').update(email).digest('hex');
+
+      mockPrisma.user.findMany.mockResolvedValue([
+        {
+          id: 'user-enemy',
+          nexaVoiceId: 'NV-ENEMY',
+          username: 'enemy',
+          email,
+          privacySettings: { discoverableByEmail: true },
+          blockedUsers: [{ id: 'block-entry' }], // Has blocked caller!
+        },
+      ]);
+
+      const results = await service.syncAddressBook('caller-id', {
+        entries: [{ identifierHash: emailHash }],
+      });
+
+      expect(results).toHaveLength(0);
+    });
+
+    it('4. should cap batch input to maximum 500 entries to prevent abuse', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([]);
+
+      const excessiveEntries = Array.from({ length: 650 }, (_, i) => ({
+        identifierHash: `hash-${i}`,
+      }));
+
+      await service.syncAddressBook('caller-id', {
+        entries: excessiveEntries,
+      });
+
+      expect(mockSecurityAudit.logEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'ADDRESS_BOOK_SYNCED',
+          metadata: expect.objectContaining({
+            submittedEntriesCount: 500, // Capped at 500!
+          }),
+        }),
+      );
+    });
+  });
 });

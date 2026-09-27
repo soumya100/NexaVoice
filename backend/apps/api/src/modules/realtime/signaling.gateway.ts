@@ -51,58 +51,92 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       (client.handshake.auth?.['token'] as string) ||
       (client.handshake.query?.['token'] as string);
 
-    // Verify JWT token during handshake
-    if (token) {
-      try {
-        const secret = this.configService.get<string>('jwt.secret', 'dev-secret-key-32-chars-long-minimum!');
-        const payload = await this.jwtService.verifyAsync<AuthTokenPayload>(token, { secret });
-
-        this.activeClients.set(client.id, {
-          userId: payload.sub,
-          roles: payload.roles || [],
-        });
-
-        if (!this.userSockets.has(payload.sub)) {
-          this.userSockets.set(payload.sub, new Set());
-        }
-        this.userSockets.get(payload.sub)!.add(client.id);
-
-        // Join individual user room for direct user notifications
-        client.join(`user:${payload.sub}`);
-
-        this.logger.log({
-          event: 'client_authenticated',
-          socketId: client.id,
-          userId: payload.sub,
-          totalActive: this.activeClients.size,
-        });
-
-        client.emit('authenticated', {
-          socketId: client.id,
-          userId: payload.sub,
-          nexaVoiceId: payload.nexaVoiceId,
-          timestamp: new Date().toISOString(),
-        });
-        return;
-      } catch (err) {
-        this.logger.warn({
-          event: 'socket_authentication_failed',
-          socketId: client.id,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+    if (!token) {
+      this.logger.warn({
+        event: 'socket_connection_rejected_no_token',
+        socketId: client.id,
+      });
+      client.emit('auth_error', { message: 'Authentication token required for realtime connection' });
+      client.disconnect(true);
+      return;
     }
 
-    // Allow unauthenticated guest connections in development fallback if needed, but restrict operations
-    const guestId = `guest-${client.id.substring(0, 6)}`;
-    this.activeClients.set(client.id, { userId: guestId, roles: ['GUEST'] });
+    try {
+      if (!this.prisma.isDatabaseConnected()) {
+        this.logger.warn({
+          event: 'socket_connection_rejected_db_down',
+          socketId: client.id,
+        });
+        client.emit('auth_error', { message: 'Authentication authority unreachable' });
+        client.disconnect(true);
+        return;
+      }
 
-    client.emit('connected', {
-      socketId: client.id,
-      userId: guestId,
-      isGuest: true,
-      timestamp: new Date().toISOString(),
-    });
+      const secret = this.configService.get<string>('jwt.secret', 'dev-secret-key-32-chars-long-minimum!');
+      const payload = await this.jwtService.verifyAsync<AuthTokenPayload>(token, { secret });
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        select: {
+          id: true,
+          accountState: true,
+          tokenVersion: true,
+        },
+      });
+
+      if (!user) {
+        client.emit('auth_error', { message: 'User account does not exist' });
+        client.disconnect(true);
+        return;
+      }
+
+      if (user.tokenVersion !== payload.tokenVersion) {
+        client.emit('auth_error', { message: 'Session token invalidated' });
+        client.disconnect(true);
+        return;
+      }
+
+      if (user.accountState === AccountState.SUSPENDED || user.accountState === AccountState.LOCKED) {
+        client.emit('auth_error', { message: `Account is ${user.accountState}` });
+        client.disconnect(true);
+        return;
+      }
+
+      this.activeClients.set(client.id, {
+        userId: payload.sub,
+        roles: payload.roles || [],
+      });
+
+      if (!this.userSockets.has(payload.sub)) {
+        this.userSockets.set(payload.sub, new Set());
+      }
+      this.userSockets.get(payload.sub)!.add(client.id);
+
+      // Join individual user room for direct user notifications
+      client.join(`user:${payload.sub}`);
+
+      this.logger.log({
+        event: 'client_authenticated',
+        socketId: client.id,
+        userId: payload.sub,
+        totalActive: this.activeClients.size,
+      });
+
+      client.emit('authenticated', {
+        socketId: client.id,
+        userId: payload.sub,
+        nexaVoiceId: payload.nexaVoiceId,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err) {
+      this.logger.warn({
+        event: 'socket_authentication_failed',
+        socketId: client.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      client.emit('auth_error', { message: 'Authentication failed: invalid or expired token' });
+      client.disconnect(true);
+    }
   }
 
   handleDisconnect(client: Socket) {
@@ -146,6 +180,36 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     if (this.server) {
       this.server.to(`user:${userId}`).emit(event, payload);
     }
+  }
+
+  /**
+   * Evicts all active sockets of a user from a specific conversation room.
+   */
+  evictUserFromConversation(userId: string, conversationId: string): void {
+    const socketIds = this.userSockets.get(userId);
+    const roomName = `conversation:${conversationId}`;
+
+    if (socketIds && socketIds.size > 0) {
+      for (const socketId of socketIds) {
+        const client = this.server?.sockets?.sockets?.get?.(socketId);
+        if (client) {
+          client.leave(roomName);
+          client.emit('conversation.evicted', {
+            conversationId,
+            userId,
+            reason: 'PARTICIPANT_REMOVED',
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+    }
+
+    this.logger.log({
+      event: 'user_evicted_from_conversation',
+      userId,
+      conversationId,
+      socketsEvicted: socketIds ? socketIds.size : 0,
+    });
   }
 
   @SubscribeMessage('join-conversation')
