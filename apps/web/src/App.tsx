@@ -5,19 +5,23 @@ import {
   CheckCircle2,
   Database,
   Globe,
+  KeyRound,
+  Lock,
   Mic,
   MicOff,
   Moon,
   Phone,
   PhoneOff,
   Radio,
+  RefreshCw,
   Server,
   Shield,
+  ShieldAlert,
   Sun,
+  UserCheck,
   Users,
   Video,
   VideoOff,
-  Zap,
 } from 'lucide-react';
 
 interface ServiceHealth {
@@ -41,12 +45,21 @@ interface HealthData {
 
 export function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const [activeTab, setActiveTab] = useState<'overview' | 'calling' | 'ai' | 'health'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'calling' | 'ai' | 'security' | 'health'>('overview');
   const [healthData, setHealthData] = useState<HealthData | null>(null);
   const [isCalling, setIsCalling] = useState(false);
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isVideoMuted, setIsVideoMuted] = useState(false);
   const [aiApprovalGranted, setAiApprovalGranted] = useState(false);
+
+  // Milestone 2 Interactive Demo State
+  const [activeRole, setActiveRole] = useState<'USER' | 'ROOM_HOST' | 'SECURITY_ADMIN' | 'SYSTEM_ADMIN'>('SECURITY_ADMIN');
+  const [auditEvents, setAuditEvents] = useState([
+    { id: 'sec-1', action: 'LOGIN_SUCCESS', result: 'SUCCESS', target: 'Session #8921', time: 'Just now' },
+    { id: 'sec-2', action: 'TOKEN_REFRESHED', result: 'SUCCESS', target: 'Single-Use Rotation', time: '2 mins ago' },
+    { id: 'sec-3', action: 'AUTHORIZATION_DENIED', result: 'DENIED', target: 'recording.delete (Legal Hold)', time: '14 mins ago' },
+    { id: 'sec-4', action: 'ROLE_ASSIGNED', result: 'SUCCESS', target: 'SECURITY_ADMIN to Alex', time: '1 hour ago' },
+  ]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -61,7 +74,6 @@ export function App() {
           const data = await res.json();
           setHealthData(data);
         } else {
-          // Fallback structure if server is starting
           setHealthData({
             status: 'standby',
             timestamp: new Date().toISOString(),
@@ -98,6 +110,19 @@ export function App() {
 
   const toggleTheme = () => {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
+
+  const handleSimulateTokenReuse = () => {
+    setAuditEvents((prev) => [
+      {
+        id: `sec-${Date.now()}`,
+        action: 'REFRESH_TOKEN_REUSE_DETECTED',
+        result: 'DENIED',
+        target: 'Attacker Replay Token #4829 -> Session Revoked',
+        time: 'Just now',
+      },
+      ...prev,
+    ]);
   };
 
   return (
@@ -145,17 +170,37 @@ export function App() {
                   border: '1px solid rgba(99, 102, 241, 0.3)',
                 }}
               >
-                v0.1.0 Phase 0
+                v0.2.0 Milestone 2
               </span>
             </div>
             <p style={{ fontSize: '0.75rem', color: 'var(--nv-text-muted)' }}>
-              Global Communication Platform & Personal AI Assistant
+              Identity, Authentication, Authorization & Security Architecture
             </p>
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          {/* Live System Status Pill */}
+          {/* User Identity Pill */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.35rem 0.85rem',
+              borderRadius: '9999px',
+              background: 'var(--nv-bg-elevated)',
+              border: '1px solid var(--nv-border)',
+              fontSize: '0.8rem',
+            }}
+          >
+            <UserCheck size={15} color="var(--nv-cyan)" />
+            <span style={{ fontWeight: 600 }}>Alex Morgan</span>
+            <span style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem', borderRadius: '4px', background: 'rgba(6, 182, 212, 0.15)', color: 'var(--nv-cyan)' }}>
+              NV-8492-1940
+            </span>
+          </div>
+
+          {/* System Status Pill */}
           <div
             style={{
               display: 'flex',
@@ -208,7 +253,7 @@ export function App() {
             }}
           >
             <Bot size={15} />
-            <span>Nexa AI: Standby</span>
+            <span>Nexa AI: Protected</span>
           </div>
 
           {/* Theme Toggle Button */}
@@ -261,11 +306,28 @@ export function App() {
               fontSize: '0.9rem',
               background: activeTab === 'overview' ? 'var(--nv-primary)' : 'transparent',
               color: activeTab === 'overview' ? '#ffffff' : 'var(--nv-text-secondary)',
-              transition: 'all 150ms ease',
             }}
           >
             <Globe size={18} />
-            Overview & Architecture
+            Overview & Blueprint
+          </button>
+
+          <button
+            onClick={() => setActiveTab('security')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              padding: '0.75rem 1rem',
+              borderRadius: '10px',
+              fontWeight: 600,
+              fontSize: '0.9rem',
+              background: activeTab === 'security' ? 'var(--nv-primary)' : 'transparent',
+              color: activeTab === 'security' ? '#ffffff' : 'var(--nv-text-secondary)',
+            }}
+          >
+            <Shield size={18} />
+            Identity & Authorization
           </button>
 
           <button
@@ -280,7 +342,6 @@ export function App() {
               fontSize: '0.9rem',
               background: activeTab === 'calling' ? 'var(--nv-primary)' : 'transparent',
               color: activeTab === 'calling' ? '#ffffff' : 'var(--nv-text-secondary)',
-              transition: 'all 150ms ease',
             }}
           >
             <Phone size={18} />
@@ -299,7 +360,6 @@ export function App() {
               fontSize: '0.9rem',
               background: activeTab === 'ai' ? 'var(--nv-primary)' : 'transparent',
               color: activeTab === 'ai' ? '#ffffff' : 'var(--nv-text-secondary)',
-              transition: 'all 150ms ease',
             }}
           >
             <Bot size={18} />
@@ -318,20 +378,19 @@ export function App() {
               fontSize: '0.9rem',
               background: activeTab === 'health' ? 'var(--nv-primary)' : 'transparent',
               color: activeTab === 'health' ? '#ffffff' : 'var(--nv-text-secondary)',
-              transition: 'all 150ms ease',
             }}
           >
             <Activity size={18} />
-            Telemetry & Health
+            Telemetry & Audit
           </button>
 
           <div style={{ marginTop: 'auto', padding: '1rem', borderRadius: '12px', background: 'var(--nv-bg-elevated)', border: '1px solid var(--nv-border)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-              <Shield size={16} color="var(--nv-primary)" />
-              <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>Clean Architecture</span>
+              <Lock size={16} color="var(--nv-primary)" />
+              <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>Security Foundation</span>
             </div>
             <p style={{ fontSize: '0.72rem', color: 'var(--nv-text-muted)' }}>
-              Modular Monolith with strict domain boundaries, GraphQL API, and Socket.IO signaling.
+              JWT Access (15m) + Rotating Refresh Token (7d) with automatic reuse detection & scrypt hashing.
             </p>
           </div>
         </aside>
@@ -341,10 +400,10 @@ export function App() {
           {activeTab === 'overview' && (
             <div>
               <div style={{ marginBottom: '2rem' }}>
-                <h2 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>Platform Foundation (Phase 0)</h2>
-                <p style={{ color: 'var(--nv-text-secondary)', maxWidth: '750px' }}>
-                  NexaVoice is architected from first principles as an extensible, secure communication ecosystem. 
-                  Below is the verified system architecture, core engineering tenets, and active services.
+                <h2 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>Milestone 2: Security & Identity Complete</h2>
+                <p style={{ color: 'var(--nv-text-secondary)', maxWidth: '780px' }}>
+                  The identity, authentication, authorization, and RBAC/ABAC foundation has been implemented, validated, and verified.
+                  The core security perimeter protects GraphQL queries, WebSocket signaling, and backend services.
                 </p>
               </div>
 
@@ -352,73 +411,73 @@ export function App() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.25rem', marginBottom: '2rem' }}>
                 <div className="glass-panel" style={{ padding: '1.5rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-                    <span style={{ fontSize: '0.85rem', color: 'var(--nv-text-muted)', fontWeight: 600 }}>API Engine</span>
-                    <Server size={20} color="var(--nv-primary)" />
+                    <span style={{ fontSize: '0.85rem', color: 'var(--nv-text-muted)', fontWeight: 600 }}>Identity Model</span>
+                    <UserCheck size={20} color="var(--nv-primary)" />
                   </div>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '0.25rem' }}>NestJS 11</div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: '0.25rem' }}>Canonical ID</div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--nv-status-online)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                    <CheckCircle2 size={14} /> Strict TypeScript & Clean Arch
+                    <CheckCircle2 size={14} /> NV-XXXX-XXXX + State Machine
                   </div>
                 </div>
 
                 <div className="glass-panel" style={{ padding: '1.5rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-                    <span style={{ fontSize: '0.85rem', color: 'var(--nv-text-muted)', fontWeight: 600 }}>Primary Application API</span>
-                    <Zap size={20} color="var(--nv-cyan)" />
+                    <span style={{ fontSize: '0.85rem', color: 'var(--nv-text-muted)', fontWeight: 600 }}>Credentials</span>
+                    <KeyRound size={20} color="var(--nv-cyan)" />
                   </div>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '0.25rem' }}>GraphQL</div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--nv-text-secondary)' }}>
-                    Code-First Schema & Queries
-                  </div>
-                </div>
-
-                <div className="glass-panel" style={{ padding: '1.5rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-                    <span style={{ fontSize: '0.85rem', color: 'var(--nv-text-muted)', fontWeight: 600 }}>Realtime Transport</span>
-                    <Radio size={20} color="#d946ef" />
-                  </div>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '0.25rem' }}>Socket.IO</div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--nv-text-secondary)' }}>
-                    Signaling, State & Presence
+                  <div style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: '0.25rem' }}>scrypt & JWT</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--nv-status-online)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <CheckCircle2 size={14} /> OWASP Salted + Timing-Safe
                   </div>
                 </div>
 
                 <div className="glass-panel" style={{ padding: '1.5rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-                    <span style={{ fontSize: '0.85rem', color: 'var(--nv-text-muted)', fontWeight: 600 }}>Data Store</span>
-                    <Database size={20} color="var(--nv-status-online)" />
+                    <span style={{ fontSize: '0.85rem', color: 'var(--nv-text-muted)', fontWeight: 600 }}>Session Security</span>
+                    <RefreshCw size={20} color="#d946ef" />
                   </div>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '0.25rem' }}>Postgres & Redis</div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--nv-text-secondary)' }}>
-                    Prisma ORM & Redis Cache
+                  <div style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: '0.25rem' }}>Rotation & Reuse</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--nv-status-online)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <CheckCircle2 size={14} /> Theft Detection & Instant Revoke
+                  </div>
+                </div>
+
+                <div className="glass-panel" style={{ padding: '1.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--nv-text-muted)', fontWeight: 600 }}>Authorization</span>
+                    <Shield size={20} color="var(--nv-status-online)" />
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: '0.25rem' }}>RBAC + ABAC</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--nv-status-online)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <CheckCircle2 size={14} /> Ownership & Contextual Policy
                   </div>
                 </div>
               </div>
 
-              {/* Architecture Principles Table */}
+              {/* Security Principles Table */}
               <div className="glass-panel" style={{ padding: '1.75rem' }}>
-                <h3 style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>Core Architectural Decisions</h3>
+                <h3 style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>Key Architectural Deliverables</h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem', padding: '0.75rem', borderRadius: '8px', background: 'var(--nv-bg-surface)' }}>
                     <div style={{ background: 'rgba(99, 102, 241, 0.1)', padding: '0.4rem', borderRadius: '6px' }}>
-                      <Shield size={18} color="var(--nv-primary)" />
+                      <KeyRound size={18} color="var(--nv-primary)" />
                     </div>
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>ADR-0001: Modular Monolith Architecture</div>
+                      <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>Single-Use Refresh Token Rotation & Replay Trap</div>
                       <div style={{ fontSize: '0.8rem', color: 'var(--nv-text-muted)' }}>
-                        Unified domain modules with explicit ports/adapters. Avoids premature microservices complexity while maintaining clean boundaries.
+                        Refresh tokens rotate with high-entropy SHA-256 hashes. Replaying an expired or stolen refresh token immediately terminates the compromised session and alerts security auditing.
                       </div>
                     </div>
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem', padding: '0.75rem', borderRadius: '8px', background: 'var(--nv-bg-surface)' }}>
                     <div style={{ background: 'rgba(6, 182, 212, 0.1)', padding: '0.4rem', borderRadius: '6px' }}>
-                      <Radio size={18} color="var(--nv-cyan)" />
+                      <Shield size={18} color="var(--nv-cyan)" />
                     </div>
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>ADR-0003: Signaling & Media Plane Separation</div>
+                      <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>ADR-0005: Hybrid RBAC + ABAC Policy Engine</div>
                       <div style={{ fontSize: '0.8rem', color: 'var(--nv-text-muted)' }}>
-                        No raw media streams route through the NestJS WebSocket gateway. WebRTC P2P and dedicated SFUs handle audio/video transport.
+                        Defense-in-depth with NestJS request guards (`JwtAuthGuard`, `PermissionsGuard`, `RolesGuard`) and domain-level authorization in `AuthorizationDecisionService`.
                       </div>
                     </div>
                   </div>
@@ -428,12 +487,186 @@ export function App() {
                       <Bot size={18} color="#d946ef" />
                     </div>
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>ADR-0004: AI Assistant Safety & Policy Gateway</div>
+                      <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>AI Assistant Authority Isolation</div>
                       <div style={{ fontSize: '0.8rem', color: 'var(--nv-text-muted)' }}>
-                        Autonomous tools are gated by granular policies and human approval. Unchecked tool execution is strictly prohibited.
+                        Personal AI assistants possess a strictly partitioned capability matrix and can never autonomously execute high-impact actions (outbound calling, transfers) without explicit human confirmation.
                       </div>
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'security' && (
+            <div>
+              <div style={{ marginBottom: '2rem' }}>
+                <h2 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>Identity, Sessions & RBAC Console</h2>
+                <p style={{ color: 'var(--nv-text-secondary)' }}>
+                  Inspect active identity credentials, switch role contexts, review active multi-device sessions, and test token security.
+                </p>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
+                {/* Active Identity Card */}
+                <div className="glass-panel" style={{ padding: '1.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <div
+                        style={{
+                          width: '48px',
+                          height: '48px',
+                          borderRadius: '50%',
+                          background: 'linear-gradient(135deg, var(--nv-cyan) 0%, var(--nv-primary) 100%)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#fff',
+                          fontWeight: 700,
+                        }}
+                      >
+                        AM
+                      </div>
+                      <div>
+                        <h3 style={{ fontSize: '1.1rem' }}>Alex Morgan</h3>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--nv-text-muted)' }}>alex@nexavoice.internal</span>
+                      </div>
+                    </div>
+                    <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: '9999px', background: 'rgba(16, 185, 129, 0.15)', color: 'var(--nv-status-online)', border: '1px solid var(--nv-status-online)' }}>
+                      ACTIVE
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', fontSize: '0.85rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid var(--nv-border)' }}>
+                      <span style={{ color: 'var(--nv-text-secondary)' }}>NexaVoice ID</span>
+                      <span style={{ fontFamily: 'var(--nv-font-mono)', fontWeight: 600 }}>NV-8492-1940</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid var(--nv-border)' }}>
+                      <span style={{ color: 'var(--nv-text-secondary)' }}>Active Role</span>
+                      <select
+                        value={activeRole}
+                        onChange={(e) => setActiveRole(e.target.value as any)}
+                        style={{
+                          background: 'var(--nv-bg-surface)',
+                          color: 'var(--nv-primary)',
+                          border: '1px solid var(--nv-border)',
+                          borderRadius: '6px',
+                          padding: '0.2rem 0.5rem',
+                          fontWeight: 600,
+                          fontSize: '0.8rem',
+                        }}
+                      >
+                        <option value="USER">USER</option>
+                        <option value="ROOM_HOST">ROOM_HOST</option>
+                        <option value="SECURITY_ADMIN">SECURITY_ADMIN</option>
+                        <option value="SYSTEM_ADMIN">SYSTEM_ADMIN</option>
+                      </select>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid var(--nv-border)' }}>
+                      <span style={{ color: 'var(--nv-text-secondary)' }}>Token Version</span>
+                      <span style={{ fontWeight: 600 }}>v1 (Valid)</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Session Security Card */}
+                <div className="glass-panel" style={{ padding: '1.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <KeyRound size={20} color="var(--nv-primary)" />
+                      <h3 style={{ fontSize: '1.1rem' }}>Active Sessions</h3>
+                    </div>
+                    <button
+                      onClick={handleSimulateTokenReuse}
+                      style={{
+                        fontSize: '0.75rem',
+                        padding: '0.3rem 0.6rem',
+                        borderRadius: '6px',
+                        background: 'rgba(244, 63, 94, 0.15)',
+                        color: 'var(--nv-danger)',
+                        border: '1px solid var(--nv-danger)',
+                        fontWeight: 600,
+                      }}
+                    >
+                      Simulate Token Reuse Attack
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    <div style={{ padding: '0.75rem', borderRadius: '8px', background: 'var(--nv-bg-surface)', border: '1px solid var(--nv-border)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                        <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>Chrome 128 / Windows 11</span>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--nv-status-online)', fontWeight: 700 }}>CURRENT SESSION</span>
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--nv-text-muted)' }}>
+                        IP: 192.168.1.42 · SHA-256 Fingerprint: e4d9...3a8f
+                      </div>
+                    </div>
+
+                    <div style={{ padding: '0.75rem', borderRadius: '8px', background: 'var(--nv-bg-surface)', border: '1px solid var(--nv-border)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                        <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>NexaVoice Mobile / iOS 18</span>
+                        <button
+                          onClick={() => alert('Remote session revoked.')}
+                          style={{ fontSize: '0.7rem', color: 'var(--nv-danger)', fontWeight: 600 }}
+                        >
+                          Revoke
+                        </button>
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--nv-text-muted)' }}>
+                        Last active 2 hrs ago · Push token active
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Security Audit Trail Stream */}
+              <div className="glass-panel" style={{ padding: '1.75rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <ShieldAlert size={18} color="var(--nv-cyan)" />
+                    <h3 style={{ fontSize: '1.1rem' }}>Realtime Security Audit Stream (SecurityEvent)</h3>
+                  </div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--nv-text-muted)' }}>Immutable Ledger</span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {auditEvents.map((ev) => (
+                    <div
+                      key={ev.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '0.75rem 1rem',
+                        borderRadius: '8px',
+                        background: 'var(--nv-bg-surface)',
+                        borderLeft: `4px solid ${ev.result === 'SUCCESS' ? 'var(--nv-status-online)' : 'var(--nv-danger)'}`,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 700, fontFamily: 'var(--nv-font-mono)' }}>{ev.action}</span>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--nv-text-secondary)' }}>{ev.target}</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                        <span
+                          style={{
+                            fontSize: '0.7rem',
+                            fontWeight: 700,
+                            padding: '0.15rem 0.5rem',
+                            borderRadius: '4px',
+                            background: ev.result === 'SUCCESS' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)',
+                            color: ev.result === 'SUCCESS' ? 'var(--nv-status-online)' : 'var(--nv-danger)',
+                          }}
+                        >
+                          {ev.result}
+                        </span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--nv-text-muted)' }}>{ev.time}</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -503,7 +736,6 @@ export function App() {
                   </div>
                 ) : (
                   <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    {/* Active call indicator */}
                     <div
                       style={{
                         display: 'flex',
@@ -523,9 +755,7 @@ export function App() {
                       CALL SESSION: ACTIVE (WebRTC Signaling Connected)
                     </div>
 
-                    {/* Participant Avatars */}
                     <div style={{ display: 'flex', gap: '2.5rem', marginBottom: '2.5rem', flexWrap: 'wrap', justifyContent: 'center' }}>
-                      {/* Host Participant */}
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
                         <div
                           style={{
@@ -551,7 +781,6 @@ export function App() {
                           <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>Alex Morgan (You)</div>
                           <span style={{ fontSize: '0.75rem', color: 'var(--nv-text-muted)' }}>Host · Speaking</span>
                         </div>
-                        {/* Audio Wave */}
                         {!isMicMuted && (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', height: '24px' }}>
                             <div className="wave-bar" style={{ animationDelay: '0ms' }} />
@@ -562,7 +791,6 @@ export function App() {
                         )}
                       </div>
 
-                      {/* AI Assistant Participant */}
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
                         <div
                           className="ai-glow-border"
@@ -590,7 +818,6 @@ export function App() {
                       </div>
                     </div>
 
-                    {/* In-Call Controls */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                       <button
                         onClick={() => setIsMicMuted(!isMicMuted)}
@@ -659,7 +886,6 @@ export function App() {
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem' }}>
-                {/* AI Persona */}
                 <div className="glass-panel" style={{ padding: '1.75rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
                     <div
@@ -698,7 +924,6 @@ export function App() {
                   </div>
                 </div>
 
-                {/* Human Approval Simulation */}
                 <div className="glass-panel" style={{ padding: '1.75rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
                     <Shield size={20} color="var(--nv-primary)" />
@@ -757,7 +982,7 @@ export function App() {
           {activeTab === 'health' && (
             <div>
               <div style={{ marginBottom: '2rem' }}>
-                <h2 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>Infrastructure Telemetry</h2>
+                <h2 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>Infrastructure & Security Telemetry</h2>
                 <p style={{ color: 'var(--nv-text-secondary)' }}>
                   Continuous status of PostgreSQL, Redis cache, WebSocket signaling, and GraphQL latency.
                 </p>

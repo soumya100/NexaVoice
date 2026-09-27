@@ -1,3 +1,4 @@
+export * from './authorization';
 export * from './identity';
 export * from './messaging';
 export * from './calling';

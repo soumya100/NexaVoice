@@ -7,18 +7,21 @@ generator client {
   provider = "prisma-client-js"
 }
 
+enum AccountState {
+  ACTIVE
+  PENDING_VERIFICATION
+  SUSPENDED
+  LOCKED
+  DEACTIVATED
+  DELETED
+}
+
 enum UserStatus {
   ONLINE
   IN_CALL
   BUSY
   AWAY
   OFFLINE
-}
-
-enum UserRole {
-  USER
-  MODERATOR
-  ADMIN
 }
 
 enum ConversationType {
@@ -88,23 +91,35 @@ enum AIActionApprovalStatus {
   AUTO_APPROVED
 }
 
+enum SecurityEventResult {
+  SUCCESS
+  FAILURE
+  DENIED
+}
+
 model User {
-  id           String      @id @default(uuid())
-  nexaVoiceId  String      @unique
-  username     String      @unique
-  email        String?     @unique
-  phone        String?     @unique
-  passwordHash String
-  displayName  String
-  avatarUrl    String?
-  status       UserStatus  @default(OFFLINE)
-  customStatus String?
-  role         UserRole    @default(USER)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  id                   String       @id @default(uuid())
+  nexaVoiceId          String       @unique
+  username             String       @unique
+  email                String?      @unique
+  phone                String?      @unique
+  passwordHash         String
+  displayName          String
+  avatarUrl            String?
+  status               UserStatus   @default(OFFLINE)
+  accountState         AccountState @default(ACTIVE)
+  customStatus         String?
+  isEmailVerified      Boolean      @default(false)
+  isPhoneVerified      Boolean      @default(false)
+  tokenVersion         Int          @default(1)
+  failedLoginAttempts  Int          @default(0)
+  lockoutUntil         DateTime?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
 
   sessions             Session[]
   devices              Device[]
+  roleAssignments      UserRoleAssignment[]
   sentMessages         Message[]                 @relation("UserSentMessages")
   conversations        ConversationParticipant[]
   callParticipants     CallParticipant[]
@@ -114,38 +129,95 @@ model User {
   contacts             Contact[]                 @relation("UserContacts")
   contactOf            Contact[]                 @relation("ContactTarget")
   auditEvents          AuditEvent[]
+  securityEvents       SecurityEvent[]
 
   @@index([username])
   @@index([nexaVoiceId])
   @@index([email])
+  @@index([accountState])
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  permissions     RolePermission[]
+  userAssignments UserRoleAssignment[]
+
+  @@index([name])
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  action      String   @unique
+  description String?
+  module      String
+  createdAt   DateTime @default(now())
+
+  rolePermissions RolePermission[]
+
+  @@index([action])
+  @@index([module])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model UserRoleAssignment {
+  userId     String
+  roleId     String
+  assignedBy String?
+  assignedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([userId])
 }
 
 model Session {
-  id           String    @id @default(uuid())
-  userId       String
-  tokenHash    String    @unique
-  deviceId     String?
-  expiresAt    DateTime
-  isRevoked    Boolean   @default(false)
-  ipAddress    String?
-  userAgent    String?
-  createdAt    DateTime  @default(now())
-  lastActiveAt DateTime  @default(now())
+  id                  String    @id @default(uuid())
+  userId              String
+  tokenHash           String    @unique
+  replacedByTokenHash String?
+  deviceId            String?
+  expiresAt           DateTime
+  isRevoked           Boolean   @default(false)
+  revocationReason    String?
+  ipAddress           String?
+  userAgent           String?
+  createdAt           DateTime  @default(now())
+  lastActiveAt        DateTime  @default(now())
 
   user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([tokenHash])
+  @@index([replacedByTokenHash])
 }
 
 model Device {
   id           String   @id @default(uuid())
   userId       String
   deviceId     String   @unique
-  deviceType   String
+  deviceType   String   // WEB, IOS, ANDROID, DESKTOP
   deviceName   String
+  platform     String?
+  appVersion   String?
   isTrusted    Boolean  @default(false)
+  pushToken    String?
   lastActiveAt DateTime @default(now())
   createdAt    DateTime @default(now())
 
@@ -269,7 +341,22 @@ model AIProfile {
   canSummarizeRecordings Boolean  @default(true)
   createdAt              DateTime @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedPermissions AIPermissionAssignment[]
+}
+
+model AIPermissionAssignment {
+  id               String   @id @default(uuid())
+  aiProfileId      String
+  permissionAction String
+  granted          Boolean  @default(false)
+  requiresApproval Boolean  @default(true)
+  grantedAt        DateTime @default(now())
+
+  aiProfile AIProfile @relation(fields: [aiProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([aiProfileId, permissionAction])
+  @@index([aiProfileId])
 }
 
 model AIAction {
@@ -321,4 +408,26 @@ model AuditEvent {
   @@index([actorId])
   @@index([action])
   @@index([createdAt])
+}
+
+model SecurityEvent {
+  id            String              @id @default(uuid())
+  actorId       String?
+  action        String
+  targetType    String?
+  targetId      String?
+  result        SecurityEventResult @default(SUCCESS)
+  reason        String?
+  ipAddress     String?
+  userAgent     String?
+  correlationId String?
+  metadataJson  String              @default("{}")
+  createdAt     DateTime            @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([action])
+  @@index([createdAt])
+  @@index([result])
 }

@@ -16,6 +16,9 @@ describe('HealthController (e2e)', () => {
       isDatabaseConnected: jest.fn().mockReturnValue(true),
       onModuleInit: jest.fn().mockResolvedValue(undefined),
       onModuleDestroy: jest.fn().mockResolvedValue(undefined),
+      permission: { upsert: jest.fn().mockResolvedValue({}) },
+      role: { upsert: jest.fn().mockResolvedValue({}) },
+      rolePermission: { upsert: jest.fn().mockResolvedValue({}) },
     };
 
     const mockRedis = {

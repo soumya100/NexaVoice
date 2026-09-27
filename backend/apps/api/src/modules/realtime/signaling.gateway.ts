@@ -8,7 +8,12 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import { AccountState, AuthTokenPayload, PermissionAction } from '@nexavoice/domain-types';
 import { StructuredLogger } from '../../infrastructure/observability/structured-logger.service';
+import { RbacService } from '../authorization/rbac.service';
+import { AuthorizationDecisionService } from '../authorization/authorization-decision.service';
 
 interface SignalingEventDto {
   callId: string;
@@ -29,34 +34,74 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   server!: Server;
 
   private readonly logger = new StructuredLogger('SignalingGateway');
-  private activeClients = new Map<string, string>(); // socketId -> userId
+  private activeClients = new Map<string, { userId: string; roles: string[] }>();
 
-  handleConnection(client: Socket) {
-    const userId = (client.handshake.query['userId'] as string) || `guest-${client.id.substring(0, 6)}`;
-    this.activeClients.set(client.id, userId);
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+    private readonly rbacService: RbacService,
+    private readonly authDecisionService: AuthorizationDecisionService,
+  ) {}
 
-    this.logger.log({
-      event: 'client_connected',
-      socketId: client.id,
-      userId,
-      totalActive: this.activeClients.size,
-    });
+  async handleConnection(client: Socket) {
+    const token =
+      (client.handshake.auth?.['token'] as string) ||
+      (client.handshake.query?.['token'] as string);
+
+    // Verify JWT token during handshake
+    if (token) {
+      try {
+        const secret = this.configService.get<string>('jwt.secret', 'dev-secret-key-32-chars-long-minimum!');
+        const payload = await this.jwtService.verifyAsync<AuthTokenPayload>(token, { secret });
+
+        this.activeClients.set(client.id, {
+          userId: payload.sub,
+          roles: payload.roles || [],
+        });
+
+        this.logger.log({
+          event: 'client_authenticated',
+          socketId: client.id,
+          userId: payload.sub,
+          totalActive: this.activeClients.size,
+        });
+
+        client.emit('authenticated', {
+          socketId: client.id,
+          userId: payload.sub,
+          nexaVoiceId: payload.nexaVoiceId,
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      } catch (err) {
+        this.logger.warn({
+          event: 'socket_authentication_failed',
+          socketId: client.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    // Allow unauthenticated guest connections in development fallback if needed, but restrict operations
+    const guestId = `guest-${client.id.substring(0, 6)}`;
+    this.activeClients.set(client.id, { userId: guestId, roles: ['GUEST'] });
 
     client.emit('connected', {
       socketId: client.id,
-      userId,
+      userId: guestId,
+      isGuest: true,
       timestamp: new Date().toISOString(),
     });
   }
 
   handleDisconnect(client: Socket) {
-    const userId = this.activeClients.get(client.id);
+    const clientData = this.activeClients.get(client.id);
     this.activeClients.delete(client.id);
 
     this.logger.log({
       event: 'client_disconnected',
       socketId: client.id,
-      userId,
+      userId: clientData?.userId,
       totalActive: this.activeClients.size,
     });
   }
@@ -66,10 +111,41 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   @SubscribeMessage('join-call')
-  handleJoinCall(
+  async handleJoinCall(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: { callId: string; userId: string },
   ) {
+    const clientData = this.activeClients.get(client.id);
+    if (!clientData) {
+      return { error: 'Unauthorized socket connection' };
+    }
+
+    const perms = await this.rbacService.getUserPermissions(clientData.userId);
+    const decision = await this.authDecisionService.authorize({
+      subject: {
+        id: clientData.userId,
+        nexaVoiceId: '',
+        accountState: AccountState.ACTIVE,
+        roles: clientData.roles,
+        permissions: perms.permissions,
+      },
+      action: PermissionAction.CALL_JOIN,
+      resource: {
+        type: 'CallSession',
+        id: payload.callId,
+      },
+    });
+
+    if (!decision.allowed) {
+      this.logger.warn({
+        event: 'join_call_denied',
+        callId: payload.callId,
+        userId: clientData.userId,
+        reason: decision.reason,
+      });
+      return { error: `Forbidden: ${decision.reason}` };
+    }
+
     client.join(`call:${payload.callId}`);
     this.logger.log({
       event: 'participant_joined_call',
@@ -78,7 +154,6 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       socketId: client.id,
     });
 
-    // Notify other participants in this call room
     client.to(`call:${payload.callId}`).emit('participant-joined', {
       callId: payload.callId,
       userId: payload.userId,
@@ -94,6 +169,11 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: SignalingEventDto,
   ) {
+    const clientData = this.activeClients.get(client.id);
+    if (!clientData) {
+      return { error: 'Unauthorized socket connection' };
+    }
+
     this.logger.debug({
       event: 'signaling_relay',
       callId: payload.callId,
@@ -103,10 +183,8 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     });
 
     if (payload.targetId) {
-      // Forward to specific target participant
       client.to(`call:${payload.callId}`).emit('signal', payload);
     } else {
-      // Broadcast to all participants in the call room except sender
       client.to(`call:${payload.callId}`).emit('signal', payload);
     }
 
