@@ -1,0 +1,324 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserStatus {
+  ONLINE
+  IN_CALL
+  BUSY
+  AWAY
+  OFFLINE
+}
+
+enum UserRole {
+  USER
+  MODERATOR
+  ADMIN
+}
+
+enum ConversationType {
+  DIRECT
+  GROUP
+  CHANNEL
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  FILE
+  VOICE
+  CALL_EVENT
+  AI_EVENT
+  SYSTEM
+}
+
+enum MessageDeliveryStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum CallType {
+  VOICE
+  VIDEO
+  CONFERENCE
+  PSTN
+}
+
+enum CallSessionStatus {
+  INITIATING
+  RINGING
+  CONNECTING
+  ACTIVE
+  ON_HOLD
+  ENDED
+  FAILED
+  MISSED
+  REJECTED
+}
+
+enum ParticipantRole {
+  HOST
+  CO_HOST
+  PARTICIPANT
+  AI_ASSISTANT
+}
+
+enum ParticipantState {
+  INVITED
+  RINGING
+  JOINED
+  MUTED
+  ON_HOLD
+  LEFT
+  DISCONNECTED
+}
+
+enum AIActionApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  AUTO_APPROVED
+}
+
+model User {
+  id           String      @id @default(uuid())
+  nexaVoiceId  String      @unique
+  username     String      @unique
+  email        String?     @unique
+  phone        String?     @unique
+  passwordHash String
+  displayName  String
+  avatarUrl    String?
+  status       UserStatus  @default(OFFLINE)
+  customStatus String?
+  role         UserRole    @default(USER)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  sessions             Session[]
+  devices              Device[]
+  sentMessages         Message[]                 @relation("UserSentMessages")
+  conversations        ConversationParticipant[]
+  callParticipants     CallParticipant[]
+  aiProfile            AIProfile?
+  aiActions            AIAction[]
+  consentRecords       ConsentRecord[]
+  contacts             Contact[]                 @relation("UserContacts")
+  contactOf            Contact[]                 @relation("ContactTarget")
+  auditEvents          AuditEvent[]
+
+  @@index([username])
+  @@index([nexaVoiceId])
+  @@index([email])
+}
+
+model Session {
+  id           String    @id @default(uuid())
+  userId       String
+  tokenHash    String    @unique
+  deviceId     String?
+  expiresAt    DateTime
+  isRevoked    Boolean   @default(false)
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime  @default(now())
+  lastActiveAt DateTime  @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([tokenHash])
+}
+
+model Device {
+  id           String   @id @default(uuid())
+  userId       String
+  deviceId     String   @unique
+  deviceType   String
+  deviceName   String
+  isTrusted    Boolean  @default(false)
+  lastActiveAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions Session[]
+
+  @@index([userId])
+}
+
+model Contact {
+  id            String   @id @default(uuid())
+  userId        String
+  contactUserId String
+  nickname      String?
+  isBlocked     Boolean  @default(false)
+  isFavorite    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  user        User @relation("UserContacts", fields: [userId], references: [id], onDelete: Cascade)
+  contactUser User @relation("ContactTarget", fields: [contactUserId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, contactUserId])
+  @@index([userId])
+}
+
+model Conversation {
+  id        String           @id @default(uuid())
+  type      ConversationType @default(DIRECT)
+  title     String?
+  avatarUrl String?
+  creatorId String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  participants ConversationParticipant[]
+  messages     Message[]
+  calls        CallSession[]
+
+  @@index([type])
+}
+
+model ConversationParticipant {
+  id                String          @id @default(uuid())
+  conversationId    String
+  userId            String
+  role              ParticipantRole @default(PARTICIPANT)
+  joinedAt          DateTime        @default(now())
+  lastReadMessageId String?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@index([conversationId])
+}
+
+model Message {
+  id             String                @id @default(uuid())
+  conversationId String
+  senderId       String
+  type           MessageType           @default(TEXT)
+  content        String
+  deliveryStatus MessageDeliveryStatus @default(PENDING)
+  isEdited       Boolean               @default(false)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation("UserSentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+}
+
+model CallSession {
+  id             String            @id @default(uuid())
+  conversationId String?
+  callType       CallType          @default(VOICE)
+  status         CallSessionStatus @default(INITIATING)
+  hostUserId     String
+  startedAt      DateTime          @default(now())
+  endedAt        DateTime?
+
+  conversation Conversation?     @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  participants CallParticipant[]
+
+  @@index([status])
+  @@index([hostUserId])
+}
+
+model CallParticipant {
+  id            String           @id @default(uuid())
+  callSessionId String
+  userId        String
+  role          ParticipantRole  @default(PARTICIPANT)
+  state         ParticipantState @default(INVITED)
+  isAudioMuted  Boolean          @default(false)
+  isVideoMuted  Boolean          @default(false)
+  joinedAt      DateTime         @default(now())
+  leftAt        DateTime?
+
+  callSession CallSession @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([callSessionId, userId])
+  @@index([callSessionId])
+  @@index([userId])
+}
+
+model AIProfile {
+  id                     String   @id @default(uuid())
+  userId                 String   @unique
+  name                   String   @default("Nexa")
+  avatarUrl              String?
+  voiceStyle             String   @default("Friendly Neutral")
+  personality            String   @default("Helpful, Concise, Professional")
+  language               String   @default("en-US")
+  autoScreeningEnabled   Boolean  @default(false)
+  canSpeakInCalls        Boolean  @default(false)
+  canSummarizeRecordings Boolean  @default(true)
+  createdAt              DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AIAction {
+  id                     String                 @id @default(uuid())
+  userId                 String
+  actionType             String
+  description            String
+  confidenceScore        Float                  @default(1.0)
+  requiresHumanApproval  Boolean                @default(false)
+  status                 AIActionApprovalStatus @default(AUTO_APPROVED)
+  payloadJson            String                 @default("{}")
+  createdAt              DateTime               @default(now())
+  executedAt             DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+}
+
+model ConsentRecord {
+  id           String   @id @default(uuid())
+  userId       String
+  consentType  String
+  version      String
+  granted      Boolean
+  jurisdiction String   @default("GLOBAL")
+  ipAddress    String?
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, consentType])
+}
+
+model AuditEvent {
+  id         String   @id @default(uuid())
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String?
+  metadata   String   @default("{}")
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([action])
+  @@index([createdAt])
+}

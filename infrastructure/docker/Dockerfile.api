@@ -1,0 +1,26 @@
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+# Copy root workspace and package manifests
+COPY package.json tsconfig.base.json ./
+COPY packages/ packages/
+COPY backend/ backend/
+COPY database/ database/
+
+RUN npm install
+RUN npm run build --workspace=@nexavoice/api
+
+FROM node:22-alpine AS runner
+
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/backend/apps/api/dist ./dist
+COPY --from=builder /app/database/prisma ./prisma
+
+EXPOSE 4000
+
+CMD ["node", "dist/main.js"]

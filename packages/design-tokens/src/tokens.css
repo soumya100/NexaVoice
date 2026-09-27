@@ -1,0 +1,73 @@
+:root {
+  /* Fonts */
+  --nv-font-display: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --nv-font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --nv-font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Brand Accents */
+  --nv-color-primary: #6366f1;
+  --nv-color-primary-hover: #4f46e5;
+  --nv-color-cyan: #06b6d4;
+  --nv-color-cyan-hover: #0891b2;
+  --nv-color-ai-gradient: linear-gradient(135deg, #8b5cf6 0%, #d946ef 100%);
+  --nv-color-ai-glow: rgba(168, 85, 247, 0.35);
+
+  /* Status */
+  --nv-status-online: #10b981;
+  --nv-status-incall: #06b6d4;
+  --nv-status-busy: #f59e0b;
+  --nv-status-offline: #64748b;
+  --nv-status-ai: #d946ef;
+
+  /* Dark Theme Default */
+  --nv-bg-canvas: #090d16;
+  --nv-bg-surface: #0f172a;
+  --nv-bg-surface-elevated: #172033;
+  --nv-bg-glass: rgba(15, 23, 42, 0.75);
+  --nv-border: #1e293b;
+  --nv-border-muted: #172033;
+  --nv-border-focus: #6366f1;
+
+  --nv-text-primary: #f8fafc;
+  --nv-text-secondary: #94a3b8;
+  --nv-text-muted: #64748b;
+  --nv-text-inverse: #090d16;
+
+  /* Shadows */
+  --nv-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --nv-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+  --nv-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+  --nv-shadow-glow-indigo: 0 0 25px -4px rgba(99, 102, 241, 0.5);
+  --nv-shadow-glow-ai: 0 0 30px -4px rgba(217, 70, 239, 0.45);
+
+  /* Radii */
+  --nv-radius-sm: 4px;
+  --nv-radius-md: 8px;
+  --nv-radius-lg: 12px;
+  --nv-radius-xl: 16px;
+  --nv-radius-full: 9999px;
+
+  /* Transitions */
+  --nv-transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --nv-transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+[data-theme='light'] {
+  --nv-bg-canvas: #f8fafc;
+  --nv-bg-surface: #ffffff;
+  --nv-bg-surface-elevated: #f1f5f9;
+  --nv-bg-glass: rgba(255, 255, 255, 0.85);
+  --nv-border: #e2e8f0;
+  --nv-border-muted: #f1f5f9;
+  --nv-border-focus: #4f46e5;
+
+  --nv-text-primary: #0f172a;
+  --nv-text-secondary: #475569;
+  --nv-text-muted: #94a3b8;
+  --nv-text-inverse: #f8fafc;
+
+  --nv-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.06);
+  --nv-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  --nv-shadow-glow-indigo: 0 0 20px -3px rgba(99, 102, 241, 0.3);
+  --nv-shadow-glow-ai: 0 0 20px -3px rgba(217, 70, 239, 0.25);
+}
