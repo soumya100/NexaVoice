@@ -10,6 +10,9 @@ import { AuthorizationModule } from './modules/authorization/authorization.modul
 import { AuthenticationModule } from './modules/authentication/authentication.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { HealthModule } from './modules/health/health.module';
+import { ContactsModule } from './modules/contacts/contacts.module';
+import { ConversationsModule } from './modules/conversations/conversations.module';
+import { MessagingModule } from './modules/messaging/messaging.module';
 
 @Module({
   imports: [
@@ -19,6 +22,9 @@ import { HealthModule } from './modules/health/health.module';
     SecurityModule,
     AuthorizationModule,
     AuthenticationModule,
+    ContactsModule,
+    ConversationsModule,
+    MessagingModule,
     RealtimeModule,
     HealthModule,
     GraphQLModule.forRootAsync<ApolloDriverConfig>({

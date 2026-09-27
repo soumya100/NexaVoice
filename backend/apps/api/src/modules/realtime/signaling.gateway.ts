@@ -14,6 +14,7 @@ import { AccountState, AuthTokenPayload, PermissionAction } from '@nexavoice/dom
 import { StructuredLogger } from '../../infrastructure/observability/structured-logger.service';
 import { RbacService } from '../authorization/rbac.service';
 import { AuthorizationDecisionService } from '../authorization/authorization-decision.service';
+import { PrismaService } from '../../infrastructure/database/prisma.service';
 
 interface SignalingEventDto {
   callId: string;
@@ -35,12 +36,14 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   private readonly logger = new StructuredLogger('SignalingGateway');
   private activeClients = new Map<string, { userId: string; roles: string[] }>();
+  private userSockets = new Map<string, Set<string>>();
 
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly rbacService: RbacService,
     private readonly authDecisionService: AuthorizationDecisionService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async handleConnection(client: Socket) {
@@ -58,6 +61,14 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
           userId: payload.sub,
           roles: payload.roles || [],
         });
+
+        if (!this.userSockets.has(payload.sub)) {
+          this.userSockets.set(payload.sub, new Set());
+        }
+        this.userSockets.get(payload.sub)!.add(client.id);
+
+        // Join individual user room for direct user notifications
+        client.join(`user:${payload.sub}`);
 
         this.logger.log({
           event: 'client_authenticated',
@@ -96,6 +107,15 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   handleDisconnect(client: Socket) {
     const clientData = this.activeClients.get(client.id);
+    if (clientData) {
+      const userSocketsSet = this.userSockets.get(clientData.userId);
+      if (userSocketsSet) {
+        userSocketsSet.delete(client.id);
+        if (userSocketsSet.size === 0) {
+          this.userSockets.delete(clientData.userId);
+        }
+      }
+    }
     this.activeClients.delete(client.id);
 
     this.logger.log({
@@ -108,6 +128,113 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   getActiveClientCount(): number {
     return this.activeClients.size;
+  }
+
+  /**
+   * Broadcasts an authorized message event to a conversation room.
+   */
+  broadcastToConversation(conversationId: string, event: string, payload: unknown): void {
+    if (this.server) {
+      this.server.to(`conversation:${conversationId}`).emit(event, payload);
+    }
+  }
+
+  /**
+   * Broadcasts an event to all connected sockets of a specific user.
+   */
+  broadcastToUser(userId: string, event: string, payload: unknown): void {
+    if (this.server) {
+      this.server.to(`user:${userId}`).emit(event, payload);
+    }
+  }
+
+  @SubscribeMessage('join-conversation')
+  async handleJoinConversation(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { conversationId: string },
+  ) {
+    const clientData = this.activeClients.get(client.id);
+    if (!clientData || clientData.userId.startsWith('guest-')) {
+      return { error: 'Unauthorized socket connection' };
+    }
+
+    if (!payload?.conversationId) {
+      return { error: 'Invalid conversationId' };
+    }
+
+    // Authorize socket access: verify membership in conversation
+    const membership = await this.prisma.conversationParticipant.findUnique({
+      where: {
+        conversationId_userId: {
+          conversationId: payload.conversationId,
+          userId: clientData.userId,
+        },
+      },
+    });
+
+    if (!membership) {
+      this.logger.warn({
+        event: 'join_conversation_denied',
+        conversationId: payload.conversationId,
+        userId: clientData.userId,
+        reason: 'NOT_A_PARTICIPANT',
+      });
+      return { error: 'Forbidden: You are not a participant in this conversation' };
+    }
+
+    client.join(`conversation:${payload.conversationId}`);
+    this.logger.log({
+      event: 'joined_conversation_room',
+      conversationId: payload.conversationId,
+      userId: clientData.userId,
+      socketId: client.id,
+    });
+
+    return { status: 'joined', conversationId: payload.conversationId };
+  }
+
+  @SubscribeMessage('leave-conversation')
+  handleLeaveConversation(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { conversationId: string },
+  ) {
+    client.leave(`conversation:${payload.conversationId}`);
+    return { status: 'left', conversationId: payload.conversationId };
+  }
+
+  @SubscribeMessage('typing-start')
+  async handleTypingStart(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { conversationId: string },
+  ) {
+    const clientData = this.activeClients.get(client.id);
+    if (!clientData || !payload?.conversationId) return;
+
+    // Verify room membership
+    if (client.rooms.has(`conversation:${payload.conversationId}`)) {
+      client.to(`conversation:${payload.conversationId}`).emit('conversation.typing.started', {
+        conversationId: payload.conversationId,
+        userId: clientData.userId,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
+  @SubscribeMessage('typing-stop')
+  async handleTypingStop(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { conversationId: string },
+  ) {
+    const clientData = this.activeClients.get(client.id);
+    if (!clientData || !payload?.conversationId) return;
+
+    if (client.rooms.has(`conversation:${payload.conversationId}`)) {
+      client.to(`conversation:${payload.conversationId}`).emit('conversation.typing.stopped', {
+        conversationId: payload.conversationId,
+        userId: clientData.userId,
+        timestamp: new Date().toISOString(),
+      });
+    }
   }
 
   @SubscribeMessage('join-call')

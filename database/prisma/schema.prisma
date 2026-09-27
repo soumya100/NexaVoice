@@ -30,6 +30,26 @@ enum ConversationType {
   CHANNEL
 }
 
+enum ConversationRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum ContactRelationshipStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  BLOCKED
+  REMOVED
+}
+
+enum PrivacyLevel {
+  EVERYONE
+  CONTACTS_ONLY
+  NOBODY
+}
+
 enum MessageType {
   TEXT
   IMAGE
@@ -46,6 +66,20 @@ enum MessageDeliveryStatus {
   DELIVERED
   READ
   FAILED
+}
+
+enum AttachmentStatus {
+  PENDING_UPLOAD
+  CLEAN
+  FLAGGED
+  DELETED
+}
+
+enum ReportStatus {
+  PENDING
+  INVESTIGATING
+  RESOLVED
+  DISMISSED
 }
 
 enum CallType {
@@ -126,15 +160,198 @@ model User {
   aiProfile            AIProfile?
   aiActions            AIAction[]
   consentRecords       ConsentRecord[]
-  contacts             Contact[]                 @relation("UserContacts")
-  contactOf            Contact[]                 @relation("ContactTarget")
   auditEvents          AuditEvent[]
   securityEvents       SecurityEvent[]
+  privacySettings      UserPrivacySettings?
+
+  sentContactRequests     ContactRelationship[] @relation("SentContactRequests")
+  receivedContactRequests ContactRelationship[] @relation("ReceivedContactRequests")
+  blockedUsers            BlockedUser[]         @relation("UserBlocks")
+  blockedByUsers          BlockedUser[]         @relation("BlockedByUsers")
+  reactions               MessageReaction[]
+  attachments             Attachment[]
+  filedReports            MessageReport[]       @relation("FiledReports")
 
   @@index([username])
   @@index([nexaVoiceId])
   @@index([email])
   @@index([accountState])
+}
+
+model UserPrivacySettings {
+  id                        String       @id @default(uuid())
+  userId                    String       @unique
+  discoverableByNexaVoiceId Boolean      @default(true)
+  discoverableByUsername    Boolean      @default(true)
+  discoverableByEmail       Boolean      @default(false)
+  discoverableByPhone       Boolean      @default(false)
+  whoCanMessageMe           PrivacyLevel @default(EVERYONE)
+  whoCanAddMeToGroups       PrivacyLevel @default(EVERYONE)
+  readReceiptsEnabled       Boolean      @default(true)
+  typingIndicatorsEnabled   Boolean      @default(true)
+  createdAt                 DateTime     @default(now())
+  updatedAt                 DateTime     @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ContactRelationship {
+  id           String                    @id @default(uuid())
+  requesterId  String
+  recipientId  String
+  status       ContactRelationshipStatus @default(PENDING)
+  nickname     String?
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+  acceptedAt   DateTime?
+  blockedAt    DateTime?
+
+  requester User @relation("SentContactRequests", fields: [requesterId], references: [id], onDelete: Cascade)
+  recipient User @relation("ReceivedContactRequests", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@unique([requesterId, recipientId])
+  @@index([requesterId])
+  @@index([recipientId])
+  @@index([status])
+}
+
+model BlockedUser {
+  id        String   @id @default(uuid())
+  blockerId String
+  blockedId String
+  reason    String?
+  createdAt DateTime @default(now())
+
+  blocker User @relation("UserBlocks", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("BlockedByUsers", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockerId])
+  @@index([blockedId])
+}
+
+model Conversation {
+  id              String           @id @default(uuid())
+  type            ConversationType @default(DIRECT)
+  title           String?
+  description     String?
+  avatarUrl       String?
+  creatorId       String?
+  directUserAId   String?
+  directUserBId   String?
+  currentSequence Int              @default(0)
+  lastMessageAt   DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  participants ConversationParticipant[]
+  messages     Message[]
+  calls        CallSession[]
+
+  @@unique([directUserAId, directUserBId])
+  @@index([type])
+  @@index([lastMessageAt])
+}
+
+model ConversationParticipant {
+  id                      String           @id @default(uuid())
+  conversationId          String
+  userId                  String
+  role                    ParticipantRole  @default(PARTICIPANT)
+  conversationRole        ConversationRole @default(MEMBER)
+  joinedAt                DateTime         @default(now())
+  lastDeliveredMessageId  String?
+  lastReadMessageId       String?
+  lastReadAt              DateTime?
+  isMuted                 Boolean          @default(false)
+  muteUntil               DateTime?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@index([conversationId])
+}
+
+model Message {
+  id                String                @id @default(uuid())
+  conversationId    String
+  senderId          String
+  clientMessageId   String?
+  sequenceNumber    Int                   @default(0)
+  type              MessageType           @default(TEXT)
+  content           String
+  replyToMessageId  String?
+  deliveryStatus    MessageDeliveryStatus @default(PENDING)
+  isEdited          Boolean               @default(false)
+  editedAt          DateTime?
+  deletedAt         DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  conversation Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User              @relation("UserSentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo      Message?          @relation("MessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies      Message[]         @relation("MessageReplies")
+  reactions    MessageReaction[]
+  attachments  Attachment[]
+
+  @@unique([conversationId, clientMessageId])
+  @@index([conversationId, sequenceNumber])
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+}
+
+model MessageReaction {
+  id        String   @id @default(uuid())
+  messageId String
+  userId    String
+  reaction  String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, reaction])
+  @@index([messageId])
+}
+
+model Attachment {
+  id              String           @id @default(uuid())
+  uploaderId      String
+  messageId       String?
+  objectKey       String           @unique
+  fileName        String
+  mimeType        String
+  sizeBytes       Int
+  checksumSha256  String?
+  status          AttachmentStatus @default(CLEAN)
+  voiceDurationMs Int?
+  voiceFormat     String?
+  createdAt       DateTime         @default(now())
+
+  uploader User     @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  message  Message? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([uploaderId])
+  @@index([messageId])
+}
+
+model MessageReport {
+  id             String       @id @default(uuid())
+  reporterId     String
+  messageId      String?
+  reportedUserId String?
+  reason         String
+  description    String?
+  status         ReportStatus @default(PENDING)
+  createdAt      DateTime     @default(now())
+
+  reporter User @relation("FiledReports", fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@index([reporterId])
+  @@index([status])
 }
 
 model Role {
@@ -225,72 +442,6 @@ model Device {
   sessions Session[]
 
   @@index([userId])
-}
-
-model Contact {
-  id            String   @id @default(uuid())
-  userId        String
-  contactUserId String
-  nickname      String?
-  isBlocked     Boolean  @default(false)
-  isFavorite    Boolean  @default(false)
-  createdAt     DateTime @default(now())
-
-  user        User @relation("UserContacts", fields: [userId], references: [id], onDelete: Cascade)
-  contactUser User @relation("ContactTarget", fields: [contactUserId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, contactUserId])
-  @@index([userId])
-}
-
-model Conversation {
-  id        String           @id @default(uuid())
-  type      ConversationType @default(DIRECT)
-  title     String?
-  avatarUrl String?
-  creatorId String?
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
-
-  participants ConversationParticipant[]
-  messages     Message[]
-  calls        CallSession[]
-
-  @@index([type])
-}
-
-model ConversationParticipant {
-  id                String          @id @default(uuid())
-  conversationId    String
-  userId            String
-  role              ParticipantRole @default(PARTICIPANT)
-  joinedAt          DateTime        @default(now())
-  lastReadMessageId String?
-
-  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([conversationId, userId])
-  @@index([userId])
-  @@index([conversationId])
-}
-
-model Message {
-  id             String                @id @default(uuid())
-  conversationId String
-  senderId       String
-  type           MessageType           @default(TEXT)
-  content        String
-  deliveryStatus MessageDeliveryStatus @default(PENDING)
-  isEdited       Boolean               @default(false)
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
-
-  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender       User         @relation("UserSentMessages", fields: [senderId], references: [id], onDelete: Cascade)
-
-  @@index([conversationId, createdAt])
-  @@index([senderId])
 }
 
 model CallSession {

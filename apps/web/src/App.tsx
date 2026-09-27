@@ -7,6 +7,7 @@ import {
   Globe,
   KeyRound,
   Lock,
+  MessageSquare,
   Mic,
   MicOff,
   Moon,
@@ -23,6 +24,7 @@ import {
   Video,
   VideoOff,
 } from 'lucide-react';
+import { MessagingWorkspace } from './components/MessagingWorkspace';
 
 interface ServiceHealth {
   status: 'up' | 'down' | 'degraded';
@@ -45,7 +47,7 @@ interface HealthData {
 
 export function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const [activeTab, setActiveTab] = useState<'overview' | 'calling' | 'ai' | 'security' | 'health'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'messaging' | 'calling' | 'ai' | 'security' | 'health'>('messaging');
   const [healthData, setHealthData] = useState<HealthData | null>(null);
   const [isCalling, setIsCalling] = useState(false);
   const [isMicMuted, setIsMicMuted] = useState(false);
@@ -313,6 +315,24 @@ export function App() {
           </button>
 
           <button
+            onClick={() => setActiveTab('messaging')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              padding: '0.75rem 1rem',
+              borderRadius: '10px',
+              fontWeight: 600,
+              fontSize: '0.9rem',
+              background: activeTab === 'messaging' ? 'var(--nv-primary)' : 'transparent',
+              color: activeTab === 'messaging' ? '#ffffff' : 'var(--nv-text-secondary)',
+            }}
+          >
+            <MessageSquare size={18} />
+            Messaging & Contacts
+          </button>
+
+          <button
             onClick={() => setActiveTab('security')}
             style={{
               display: 'flex',
@@ -396,7 +416,15 @@ export function App() {
         </aside>
 
         {/* Content Area */}
-        <main style={{ flex: 1, padding: '2rem 3rem', overflowY: 'auto' }}>
+        <main
+          style={{
+            flex: 1,
+            padding: activeTab === 'messaging' ? 0 : '2rem 3rem',
+            overflowY: activeTab === 'messaging' ? 'hidden' : 'auto',
+          }}
+        >
+          {activeTab === 'messaging' && <MessagingWorkspace />}
+
           {activeTab === 'overview' && (
             <div>
               <div style={{ marginBottom: '2rem' }}>
