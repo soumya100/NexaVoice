@@ -27,14 +27,16 @@ export class PasswordHasher {
       throw new Error('Password must be at least 8 characters long');
     }
 
+    const normalized = password.normalize('NFC');
     const salt = randomBytes(16).toString('hex');
-    const derivedKey = await scryptPromise(password, salt);
+    const derivedKey = await scryptPromise(normalized, salt);
 
     return `scrypt$N=${SCRYPT_PARAMS.N},r=${SCRYPT_PARAMS.r},p=${SCRYPT_PARAMS.p}$${salt}$${derivedKey.toString('hex')}`;
   }
 
   /**
    * Verifies plaintext password against stored scrypt hash using constant-time comparison.
+   * Includes fallback checks for Unicode NFC normalization and accidental whitespace trimming.
    */
   static async verify(password: string, storedHash: string): Promise<boolean> {
     if (!password || !storedHash) {
@@ -54,14 +56,31 @@ export class PasswordHasher {
     }
 
     try {
-      const derivedKey = await scryptPromise(password, salt);
       const originalBuffer = Buffer.from(originalHash, 'hex');
 
-      if (derivedKey.length !== originalBuffer.length) {
-        return false;
+      // 1. Primary check: NFC normalized
+      const normalized = password.normalize('NFC');
+      const derivedKey = await scryptPromise(normalized, salt);
+
+      if (derivedKey.length === originalBuffer.length && timingSafeEqual(derivedKey, originalBuffer)) {
+        return true;
       }
 
-      return timingSafeEqual(derivedKey, originalBuffer);
+      // 2. Fallback: Trimmed password (if user had accidental leading/trailing spaces)
+      if (password.trim() !== password) {
+        const trimmedKey = await scryptPromise(password.trim().normalize('NFC'), salt);
+        if (trimmedKey.length === originalBuffer.length && timingSafeEqual(trimmedKey, originalBuffer)) {
+          return true;
+        }
+      }
+
+      // 3. Fallback: Raw password (for existing legacy hashes without NFC normalization)
+      const rawKey = await scryptPromise(password, salt);
+      if (rawKey.length === originalBuffer.length && timingSafeEqual(rawKey, originalBuffer)) {
+        return true;
+      }
+
+      return false;
     } catch {
       return false;
     }

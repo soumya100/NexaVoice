@@ -15,7 +15,7 @@ import {
 @Injectable()
 export class S3StorageProvider implements ObjectStorageProvider {
   private readonly bucketName: string;
-  private readonly endpoint?: string;
+  public readonly endpoint?: string;
   private readonly region: string;
   private readonly isConfigured: boolean;
 
@@ -28,14 +28,14 @@ export class S3StorageProvider implements ObjectStorageProvider {
     this.isConfigured = Boolean(accessKey && secretKey);
   }
 
-  async putObject(key: string, data: Buffer, _mimeType: string): Promise<void> {
+  async putObject(_key: string, _data: Buffer, _mimeType: string): Promise<void> {
     if (!this.isConfigured) {
       throw new Error('S3StorageProvider is PROVIDER-DEPENDENT: AWS/S3 credentials not configured');
     }
     // S3 client putObject implementation
   }
 
-  async getObject(key: string): Promise<{
+  async getObject(_key: string): Promise<{
     stream: Readable;
     sizeBytes: number;
     mimeType: string;
@@ -50,7 +50,7 @@ export class S3StorageProvider implements ObjectStorageProvider {
     };
   }
 
-  async deleteObject(key: string): Promise<void> {
+  async deleteObject(_key: string): Promise<void> {
     if (!this.isConfigured) {
       throw new Error('S3StorageProvider is PROVIDER-DEPENDENT: AWS/S3 credentials not configured');
     }

@@ -14,6 +14,10 @@ import { ContactsModule } from './modules/contacts/contacts.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
 import { AttachmentsModule } from './modules/attachments/attachments.module';
+import { CallingModule } from './modules/calling/calling.module';
+import { TelephonyModule } from './modules/telephony/telephony.module';
+import { AIModule } from './modules/ai/ai.module';
+import { EmailModule } from './modules/email/email.module';
 
 @Module({
   imports: [
@@ -23,10 +27,14 @@ import { AttachmentsModule } from './modules/attachments/attachments.module';
     SecurityModule,
     AuthorizationModule,
     AuthenticationModule,
+    EmailModule,
     ContactsModule,
     ConversationsModule,
     MessagingModule,
     AttachmentsModule,
+    CallingModule,
+    TelephonyModule,
+    AIModule,
     RealtimeModule,
     HealthModule,
     GraphQLModule.forRootAsync<ApolloDriverConfig>({

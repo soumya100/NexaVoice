@@ -1,10 +1,12 @@
 import {
   BadRequestException,
   Injectable,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'crypto';
 import {
   AccountState,
   AuthTokenPayload,
@@ -12,21 +14,27 @@ import {
   UserStatus,
 } from '@nexavoice/domain-types';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
+import { RedisService } from '../../infrastructure/cache/redis.service';
 import { PasswordHasher } from '../../common/security/password-hasher';
 import { IdGenerator } from '../../common/security/id-generator';
 import { SessionService } from './session.service';
 import { RbacService } from '../authorization/rbac.service';
 import { SecurityAuditService } from '../security/security-audit.service';
+import { EmailService } from '../email/email.service';
 import {
   AuthPayloadGql,
   LoginInput,
+  PasswordResetResponseGql,
   RegisterInput,
+  RequestPasswordResetInput,
+  ResetPasswordInput,
   UserProfileGql,
 } from './authentication.types';
 
 @Injectable()
 export class AuthenticationService {
   private readonly accessExpirationSeconds: number;
+  private readonly inMemoryResetTokens = new Map<string, { userId: string; email: string; expiresAt: number }>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -35,6 +43,8 @@ export class AuthenticationService {
     private readonly sessionService: SessionService,
     private readonly rbacService: RbacService,
     private readonly securityAudit: SecurityAuditService,
+    @Optional() private readonly redisService?: RedisService,
+    @Optional() private readonly emailService?: EmailService,
   ) {
     this.accessExpirationSeconds = this.configService.get<number>(
       'jwt.accessExpiration',
@@ -53,18 +63,23 @@ export class AuthenticationService {
       throw new BadRequestException('Database is currently offline. Please try again.');
     }
 
+    const cleanUsername = input.username.trim();
+    const cleanDisplayName = input.displayName.trim();
+    const cleanEmail = input.email ? input.email.trim().toLowerCase() : undefined;
+    const cleanPhone = input.phone ? input.phone.trim() : undefined;
+
     // 1. Check existing username and email
     const existing = await this.prisma.user.findFirst({
       where: {
         OR: [
-          { username: { equals: input.username, mode: 'insensitive' as const } },
-          ...(input.email ? [{ email: { equals: input.email, mode: 'insensitive' as const } }] : []),
+          { username: { equals: cleanUsername, mode: 'insensitive' as const } },
+          ...(cleanEmail ? [{ email: { equals: cleanEmail, mode: 'insensitive' as const } }] : []),
         ],
       },
     });
 
     if (existing) {
-      if (existing.username.toLowerCase() === input.username.toLowerCase()) {
+      if (existing.username.toLowerCase() === cleanUsername.toLowerCase()) {
         throw new BadRequestException('Username is already taken');
       }
       throw new BadRequestException('Email is already registered');
@@ -78,16 +93,16 @@ export class AuthenticationService {
     const user = await this.prisma.user.create({
       data: {
         nexaVoiceId,
-        username: input.username,
-        displayName: input.displayName,
-        email: input.email,
-        phone: input.phone,
+        username: cleanUsername,
+        displayName: cleanDisplayName,
+        email: cleanEmail,
+        phone: cleanPhone,
         passwordHash,
         status: UserStatus.ONLINE,
         accountState: AccountState.ACTIVE,
         aiProfile: {
           create: {
-            name: `${input.displayName}'s AI`,
+            name: `${cleanDisplayName}'s AI`,
             personality: 'Helpful, Concise, Professional',
             language: 'en-US',
           },
@@ -161,16 +176,32 @@ export class AuthenticationService {
       throw new BadRequestException('Database is currently offline. Please try again.');
     }
 
+    const cleanIdentifier = input.identifier.trim();
+
     // 1. Locate user by username, email, or NexaVoice ID
-    const user = await this.prisma.user.findFirst({
+    let user = await this.prisma.user.findFirst({
       where: {
         OR: [
-          { username: { equals: input.identifier, mode: 'insensitive' as const } },
-          { email: { equals: input.identifier, mode: 'insensitive' as const } },
-          { nexaVoiceId: input.identifier },
+          { username: { equals: cleanIdentifier, mode: 'insensitive' as const } },
+          { email: { equals: cleanIdentifier, mode: 'insensitive' as const } },
+          { nexaVoiceId: { equals: cleanIdentifier, mode: 'insensitive' as const } },
         ],
       },
     });
+
+    // 1b. Fallback: If not matched by username/email/ID, check displayName or phone
+    if (!user) {
+      user = await this.prisma.user.findFirst({
+        where: {
+          OR: [
+            { displayName: { equals: cleanIdentifier, mode: 'insensitive' as const } },
+            ...(cleanIdentifier.startsWith('+') || /^\d+$/.test(cleanIdentifier)
+              ? [{ phone: { equals: cleanIdentifier, mode: 'insensitive' as const } }]
+              : []),
+          ],
+        },
+      });
+    }
 
     if (!user) {
       await this.securityAudit.logEvent({
@@ -179,7 +210,7 @@ export class AuthenticationService {
         reason: 'User not found',
         ipAddress: metadata?.ipAddress,
         userAgent: metadata?.userAgent,
-        metadata: { identifierAttempt: input.identifier },
+        metadata: { identifierAttempt: cleanIdentifier },
       });
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -374,6 +405,155 @@ export class AuthenticationService {
       roles: perms.roles,
       permissions: perms.permissions,
       createdAt: user.createdAt.toISOString(),
+    };
+  }
+
+  /**
+   * Generates a single-use password reset token with 1-hour expiration and logs security event.
+   */
+  async requestPasswordReset(
+    input: RequestPasswordResetInput,
+    metadata?: { ipAddress?: string; userAgent?: string },
+  ): Promise<PasswordResetResponseGql> {
+    const email = input.email.trim().toLowerCase();
+    const user = await this.prisma.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' as const } },
+    });
+
+    if (!user) {
+      // Mitigate user enumeration attacks: return generic success
+      return {
+        success: true,
+        message: 'If an account exists with this email address, password reset instructions have been sent.',
+      };
+    }
+
+    const resetToken = randomUUID();
+    const ttlSeconds = 3600; // 1 hour
+    const tokenData = JSON.stringify({ userId: user.id, email: user.email });
+
+    if (this.redisService?.isRedisConnected()) {
+      await this.redisService.set(`pwd_reset:${resetToken}`, tokenData, ttlSeconds);
+    } else {
+      this.inMemoryResetTokens.set(resetToken, {
+        userId: user.id,
+        email: user.email || email,
+        expiresAt: Date.now() + ttlSeconds * 1000,
+      });
+    }
+
+    await this.securityAudit.logEvent({
+      actorId: user.id,
+      action: 'PASSWORD_RESET_REQUESTED',
+      targetType: 'User',
+      targetId: user.id,
+      result: 'SUCCESS',
+      ipAddress: metadata?.ipAddress,
+      userAgent: metadata?.userAgent,
+    });
+
+    if (this.emailService && user.email) {
+      await this.emailService
+        .sendPasswordResetEmail({
+          to: user.email,
+          displayName: user.displayName,
+          resetToken,
+          ipAddress: metadata?.ipAddress,
+        })
+        .catch(() => {
+          // Gracefully suppress external provider errors from breaking client response
+        });
+    }
+
+    return {
+      success: true,
+      message: 'If an account exists with this email address, password reset instructions have been sent.',
+      resetToken: process.env.NODE_ENV !== 'production' ? resetToken : undefined,
+    };
+  }
+
+  /**
+   * Resets password given a valid token, updates hash, increments tokenVersion, and revokes active sessions.
+   */
+  async resetPassword(
+    input: ResetPasswordInput,
+    metadata?: { ipAddress?: string; userAgent?: string },
+  ): Promise<PasswordResetResponseGql> {
+    const { token, newPassword } = input;
+    if (!token || !newPassword || newPassword.length < 8) {
+      throw new BadRequestException('Password must be at least 8 characters long');
+    }
+
+    let tokenPayload: { userId: string; email: string } | null = null;
+
+    if (this.redisService?.isRedisConnected()) {
+      const data = await this.redisService.get(`pwd_reset:${token}`);
+      if (data) {
+        tokenPayload = JSON.parse(data);
+      }
+    } else {
+      const entry = this.inMemoryResetTokens.get(token);
+      if (entry && entry.expiresAt > Date.now()) {
+        tokenPayload = { userId: entry.userId, email: entry.email };
+      }
+    }
+
+    if (!tokenPayload) {
+      await this.securityAudit.logEvent({
+        action: 'PASSWORD_RESET_FAILED',
+        result: 'FAILURE',
+        reason: 'Invalid or expired password reset token',
+        ipAddress: metadata?.ipAddress,
+        userAgent: metadata?.userAgent,
+      });
+      throw new BadRequestException('Invalid or expired password reset token. Please request a new link.');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: tokenPayload.userId },
+    });
+
+    if (!user) {
+      throw new BadRequestException('User account not found');
+    }
+
+    // Hash new password
+    const passwordHash = await PasswordHasher.hash(newPassword);
+
+    // Update password, increment tokenVersion (invalidates all outstanding JWTs), reset lockout & failed attempts
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        tokenVersion: { increment: 1 },
+        failedLoginAttempts: 0,
+        lockoutUntil: null,
+      },
+    });
+
+    // Revoke all existing sessions across all devices
+    await this.sessionService.revokeAllSessions(user.id, 'USER_PASSWORD_RESET');
+
+    // Clean up used token
+    if (this.redisService?.isRedisConnected()) {
+      await this.redisService.del(`pwd_reset:${token}`);
+    } else {
+      this.inMemoryResetTokens.delete(token);
+    }
+
+    await this.securityAudit.logEvent({
+      actorId: user.id,
+      action: 'PASSWORD_RESET_SUCCESS',
+      targetType: 'User',
+      targetId: user.id,
+      result: 'SUCCESS',
+      ipAddress: metadata?.ipAddress,
+      userAgent: metadata?.userAgent,
+    });
+
+    return {
+      success: true,
+      message: 'Password has been reset successfully. You can now sign in with your new password.',
     };
   }
 

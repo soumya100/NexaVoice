@@ -113,13 +113,17 @@ export class SessionService {
 
     if (storedToken) {
       const family = storedToken.family;
-      const session = family.session;
+      const session =
+        family?.session ||
+        (family?.sessionId
+          ? await this.prisma.session.findUnique({ where: { id: family.sessionId } })
+          : null);
 
       // MULTI-HOP REUSE DETECTION:
       // If the token was ALREADY USED (usedAt !== null or replacedByTokenId !== null) or marked isRevoked
       if (storedToken.usedAt !== null || storedToken.replacedByTokenId !== null || storedToken.isRevoked) {
         // Multi-hop token reuse detected! Immediately revoke entire family and session.
-        await this.prisma.$transaction([
+        const ops: any[] = [
           this.prisma.refreshTokenFamily.update({
             where: { id: family.id },
             data: {
@@ -135,20 +139,27 @@ export class SessionService {
               revokedAt: new Date(),
             },
           }),
-          this.prisma.session.update({
-            where: { id: session.id },
-            data: {
-              isRevoked: true,
-              revocationReason: 'REFRESH_TOKEN_REUSE_DETECTED',
-            },
-          }),
-        ]);
+        ];
+
+        if (session) {
+          ops.push(
+            this.prisma.session.update({
+              where: { id: session.id },
+              data: {
+                isRevoked: true,
+                revocationReason: 'REFRESH_TOKEN_REUSE_DETECTED',
+              },
+            }),
+          );
+        }
+
+        await this.prisma.$transaction(ops);
 
         await this.securityAudit.logEvent({
-          actorId: session.userId,
+          actorId: session?.userId,
           action: 'REFRESH_TOKEN_REUSE_DETECTED',
           targetType: 'Session',
-          targetId: session.id,
+          targetId: session?.id || family.sessionId,
           result: 'DENIED',
           reason: 'Multi-hop token reuse detected; entire token family and session revoked',
           ipAddress: metadata?.ipAddress,

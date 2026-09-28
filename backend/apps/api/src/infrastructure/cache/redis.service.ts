@@ -12,25 +12,45 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly configService: ConfigService) {}
 
   onModuleInit() {
-    const host = this.configService.get<string>('redis.host', 'localhost');
+    let host = this.configService.get<string>('redis.host', 'localhost');
     const port = this.configService.get<number>('redis.port', 6379);
     const password = this.configService.get<string | undefined>('redis.password');
     const db = this.configService.get<number>('redis.db', 0);
+    const redisUrl = process.env.REDIS_URL;
 
     try {
-      this.client = new Redis({
-        host,
-        port,
-        password,
-        db,
-        retryStrategy: (times) => {
-          if (times > 3) {
-            return null; // Stop retrying after 3 attempts during init to avoid hanging
-          }
-          return Math.min(times * 100, 1000);
-        },
-        lazyConnect: true,
-      });
+      const retryStrategy = (times: number) => {
+        if (times > 3) {
+          return null; // Stop retrying after 3 attempts during init to avoid hanging
+        }
+        return Math.min(times * 100, 1000);
+      };
+
+      if (redisUrl || host.includes('redis://') || host.includes('rediss://')) {
+        let rawUrl = redisUrl || host;
+        // If user pasted command like: redis-cli --tls -u redis://...
+        const match = rawUrl.match(/(rediss?:\/\/[^\s]+)/);
+        if (match) {
+          rawUrl = match[1];
+        }
+        // Ensure Upstash connections use TLS (rediss://)
+        if (rawUrl.includes('upstash.io') && rawUrl.startsWith('redis://')) {
+          rawUrl = rawUrl.replace('redis://', 'rediss://');
+        }
+        this.client = new Redis(rawUrl, {
+          retryStrategy,
+          lazyConnect: true,
+        });
+      } else {
+        this.client = new Redis({
+          host,
+          port,
+          password,
+          db,
+          retryStrategy,
+          lazyConnect: true,
+        });
+      }
 
       this.client.on('connect', () => {
         this.isConnected = true;

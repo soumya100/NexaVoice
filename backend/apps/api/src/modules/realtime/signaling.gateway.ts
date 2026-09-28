@@ -183,6 +183,15 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   /**
+   * Broadcasts an event to all participants in a call room.
+   */
+  broadcastToCall(callId: string, event: string, payload: unknown): void {
+    if (this.server) {
+      this.server.to(`call:${callId}`).emit(event, payload);
+    }
+  }
+
+  /**
    * Evicts all active sockets of a user from a specific conversation room.
    */
   evictUserFromConversation(userId: string, conversationId: string): void {
@@ -209,6 +218,58 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       userId,
       conversationId,
       socketsEvicted: socketIds ? socketIds.size : 0,
+    });
+  }
+
+  /**
+   * Evicts all active sockets of a user from a specific call room.
+   */
+  evictUserFromCall(userId: string, callId: string, reason = 'PARTICIPANT_REMOVED'): void {
+    const socketIds = this.userSockets.get(userId);
+    const roomName = `call:${callId}`;
+
+    if (socketIds && socketIds.size > 0) {
+      for (const socketId of socketIds) {
+        const client = this.server?.sockets?.sockets?.get?.(socketId);
+        if (client) {
+          client.leave(roomName);
+          client.emit('call.evicted', {
+            callId,
+            userId,
+            reason,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+    }
+
+    this.logger.log({
+      event: 'user_evicted_from_call',
+      userId,
+      callId,
+      reason,
+      socketsEvicted: socketIds ? socketIds.size : 0,
+    });
+  }
+
+  /**
+   * Evicts all connected sockets from a call room when call is ended.
+   */
+  evictAllFromCall(callId: string, reason = 'CALL_ENDED'): void {
+    const roomName = `call:${callId}`;
+    if (this.server) {
+      this.server.to(roomName).emit('call.ended', {
+        callId,
+        reason,
+        timestamp: new Date().toISOString(),
+      });
+      this.server.socketsLeave(roomName);
+    }
+
+    this.logger.log({
+      event: 'all_users_evicted_from_call',
+      callId,
+      reason,
     });
   }
 
@@ -274,7 +335,6 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     const clientData = this.activeClients.get(client.id);
     if (!clientData || !payload?.conversationId) return;
 
-    // Verify room membership
     if (client.rooms.has(`conversation:${payload.conversationId}`)) {
       client.to(`conversation:${payload.conversationId}`).emit('conversation.typing.started', {
         conversationId: payload.conversationId,
@@ -304,17 +364,52 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   @SubscribeMessage('join-call')
   async handleJoinCall(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { callId: string; userId: string },
+    @MessageBody() payload: { callId: string; userId?: string },
   ) {
     const clientData = this.activeClients.get(client.id);
     if (!clientData) {
       return { error: 'Unauthorized socket connection' };
     }
 
-    const perms = await this.rbacService.getUserPermissions(clientData.userId);
+    const userId = clientData.userId;
+    if (!payload?.callId) {
+      return { error: 'Invalid callId' };
+    }
+
+    // Zero-trust verification: check user is authorized for this call
+    const call = await this.prisma.callSession.findUnique({
+      where: { id: payload.callId },
+      include: {
+        participants: {
+          where: { userId },
+        },
+      },
+    });
+
+    if (!call) {
+      return { error: 'Call session not found' };
+    }
+
+    if (call.status === 'ENDED' || call.status === 'FAILED' || call.status === 'MISSED' || call.status === 'REJECTED') {
+      return { error: `Call session is ${call.status}` };
+    }
+
+    const isHost = call.hostUserId === userId;
+    const isParticipant = call.participants.length > 0;
+
+    if (!isHost && !isParticipant) {
+      this.logger.warn({
+        event: 'join_call_denied_not_authorized',
+        callId: payload.callId,
+        userId,
+      });
+      return { error: 'Forbidden: You are not authorized to join this call' };
+    }
+
+    const perms = await this.rbacService.getUserPermissions(userId);
     const decision = await this.authDecisionService.authorize({
       subject: {
-        id: clientData.userId,
+        id: userId,
         nexaVoiceId: '',
         accountState: AccountState.ACTIVE,
         roles: clientData.roles,
@@ -329,9 +424,9 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     if (!decision.allowed) {
       this.logger.warn({
-        event: 'join_call_denied',
+        event: 'join_call_denied_by_policy',
         callId: payload.callId,
-        userId: clientData.userId,
+        userId,
         reason: decision.reason,
       });
       return { error: `Forbidden: ${decision.reason}` };
@@ -341,13 +436,13 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     this.logger.log({
       event: 'participant_joined_call',
       callId: payload.callId,
-      userId: payload.userId,
+      userId,
       socketId: client.id,
     });
 
-    client.to(`call:${payload.callId}`).emit('participant-joined', {
+    client.to(`call:${payload.callId}`).emit('call.participant.joined', {
       callId: payload.callId,
-      userId: payload.userId,
+      userId,
       socketId: client.id,
       timestamp: new Date().toISOString(),
     });
@@ -356,7 +451,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   @SubscribeMessage('signal')
-  handleSignal(
+  async handleSignal(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: SignalingEventDto,
   ) {
@@ -365,32 +460,136 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       return { error: 'Unauthorized socket connection' };
     }
 
-    this.logger.debug({
-      event: 'signaling_relay',
+    if (!payload?.callId || !payload?.type) {
+      return { error: 'Invalid signaling payload' };
+    }
+
+    // Verify socket is joined to the call room (prevents signaling injection)
+    if (!client.rooms.has(`call:${payload.callId}`)) {
+      this.logger.warn({
+        event: 'signaling_injection_rejected',
+        callId: payload.callId,
+        userId: clientData.userId,
+      });
+      return { error: 'Forbidden: Socket is not a member of this call room' };
+    }
+
+    const sanitizedPayload: SignalingEventDto = {
       callId: payload.callId,
-      type: payload.type,
-      senderId: payload.senderId,
+      senderId: clientData.userId, // Server-enforced senderId (cannot be forged)
       targetId: payload.targetId,
-    });
+      type: payload.type,
+      data: payload.data,
+    };
 
     if (payload.targetId) {
-      client.to(`call:${payload.callId}`).emit('signal', payload);
+      // Forward to specific target user
+      this.server.to(`user:${payload.targetId}`).emit('call.signal', sanitizedPayload);
     } else {
-      client.to(`call:${payload.callId}`).emit('signal', payload);
+      // Broadcast to other participants in call room
+      client.to(`call:${payload.callId}`).emit('call.signal', sanitizedPayload);
     }
 
     return { received: true };
   }
 
+  @SubscribeMessage('call:offer')
+  async handleCallOffer(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { callId: string; sdp: string; targetUserId?: string },
+  ) {
+    const clientData = this.activeClients.get(client.id);
+    if (!clientData || !client.rooms.has(`call:${payload?.callId}`)) {
+      return { error: 'Unauthorized or not in call room' };
+    }
+
+    const event = {
+      callId: payload.callId,
+      senderId: clientData.userId,
+      targetUserId: payload.targetUserId,
+      sdp: payload.sdp,
+      type: 'offer',
+      timestamp: new Date().toISOString(),
+    };
+
+    if (payload.targetUserId) {
+      this.server.to(`user:${payload.targetUserId}`).emit('call.offer', event);
+    } else {
+      client.to(`call:${payload.callId}`).emit('call.offer', event);
+    }
+
+    return { status: 'offer_relayed' };
+  }
+
+  @SubscribeMessage('call:answer')
+  async handleCallAnswer(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { callId: string; sdp: string; targetUserId?: string },
+  ) {
+    const clientData = this.activeClients.get(client.id);
+    if (!clientData || !client.rooms.has(`call:${payload?.callId}`)) {
+      return { error: 'Unauthorized or not in call room' };
+    }
+
+    const event = {
+      callId: payload.callId,
+      senderId: clientData.userId,
+      targetUserId: payload.targetUserId,
+      sdp: payload.sdp,
+      type: 'answer',
+      timestamp: new Date().toISOString(),
+    };
+
+    if (payload.targetUserId) {
+      this.server.to(`user:${payload.targetUserId}`).emit('call.answer', event);
+    } else {
+      client.to(`call:${payload.callId}`).emit('call.answer', event);
+    }
+
+    return { status: 'answer_relayed' };
+  }
+
+  @SubscribeMessage('call:ice-candidate')
+  async handleCallIceCandidate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { callId: string; candidate: unknown; targetUserId?: string },
+  ) {
+    const clientData = this.activeClients.get(client.id);
+    if (!clientData || !client.rooms.has(`call:${payload?.callId}`)) {
+      return { error: 'Unauthorized or not in call room' };
+    }
+
+    const event = {
+      callId: payload.callId,
+      senderId: clientData.userId,
+      targetUserId: payload.targetUserId,
+      candidate: payload.candidate,
+      timestamp: new Date().toISOString(),
+    };
+
+    if (payload.targetUserId) {
+      this.server.to(`user:${payload.targetUserId}`).emit('call.ice-candidate', event);
+    } else {
+      client.to(`call:${payload.callId}`).emit('call.ice-candidate', event);
+    }
+
+    return { status: 'ice_candidate_relayed' };
+  }
+
   @SubscribeMessage('leave-call')
   handleLeaveCall(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { callId: string; userId: string },
+    @MessageBody() payload: { callId: string },
   ) {
+    const clientData = this.activeClients.get(client.id);
+    if (!clientData || !payload?.callId) {
+      return { error: 'Invalid leave request' };
+    }
+
     client.leave(`call:${payload.callId}`);
-    client.to(`call:${payload.callId}`).emit('participant-left', {
+    client.to(`call:${payload.callId}`).emit('call.participant.left', {
       callId: payload.callId,
-      userId: payload.userId,
+      userId: clientData.userId,
       timestamp: new Date().toISOString(),
     });
 

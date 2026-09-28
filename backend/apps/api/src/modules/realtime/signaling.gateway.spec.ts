@@ -22,6 +22,16 @@ describe('SignalingGateway', () => {
       authorize: jest.fn(),
     };
     mockPrisma = {
+      isDatabaseConnected: jest.fn().mockReturnValue(true),
+      user: {
+        findUnique: jest.fn().mockImplementation(({ where }) =>
+          Promise.resolve({
+            id: where.id,
+            accountState: 'ACTIVE',
+            tokenVersion: 1,
+          }),
+        ),
+      },
       conversationParticipant: {
         findUnique: jest.fn(),
       },
@@ -38,7 +48,7 @@ describe('SignalingGateway', () => {
 
   describe('handleJoinConversation', () => {
     it('rejects unauthenticated socket connections', async () => {
-      const mockSocket: any = { id: 'sock-1', emit: jest.fn() };
+      const mockSocket: any = { id: 'sock-1', emit: jest.fn(), disconnect: jest.fn() };
       const res = await gateway.handleJoinConversation(mockSocket, {
         conversationId: 'conv-1',
       });
@@ -52,10 +62,12 @@ describe('SignalingGateway', () => {
         handshake: { auth: { token: 'valid-token' } },
         emit: jest.fn(),
         join: jest.fn(),
+        disconnect: jest.fn(),
       };
 
       mockJwtService.verifyAsync.mockResolvedValue({
         sub: 'user-intruder',
+        tokenVersion: 1,
         roles: ['USER'],
       });
 
@@ -79,10 +91,12 @@ describe('SignalingGateway', () => {
         handshake: { auth: { token: 'valid-token' } },
         emit: jest.fn(),
         join: jest.fn(),
+        disconnect: jest.fn(),
       };
 
       mockJwtService.verifyAsync.mockResolvedValue({
         sub: 'user-member',
+        tokenVersion: 1,
         roles: ['USER'],
       });
 
@@ -100,6 +114,43 @@ describe('SignalingGateway', () => {
 
       expect(res).toEqual({ status: 'joined', conversationId: 'conv-shared' });
       expect(mockSocket.join).toHaveBeenCalledWith('conversation:conv-shared');
+    });
+
+    it('evictUserFromConversation evicts all active sockets of the user and emits eviction event', async () => {
+      const mockSocket: any = {
+        id: 'sock-evict',
+        handshake: { auth: { token: 'valid-token' } },
+        emit: jest.fn(),
+        join: jest.fn(),
+        leave: jest.fn(),
+        disconnect: jest.fn(),
+      };
+
+      mockJwtService.verifyAsync.mockResolvedValue({
+        sub: 'user-evicted',
+        tokenVersion: 1,
+        roles: ['USER'],
+      });
+
+      gateway.server = {
+        sockets: {
+          sockets: new Map([['sock-evict', mockSocket]]),
+        },
+      } as any;
+
+      await gateway.handleConnection(mockSocket);
+
+      gateway.evictUserFromConversation('user-evicted', 'conv-100');
+
+      expect(mockSocket.leave).toHaveBeenCalledWith('conversation:conv-100');
+      expect(mockSocket.emit).toHaveBeenCalledWith(
+        'conversation.evicted',
+        expect.objectContaining({
+          conversationId: 'conv-100',
+          userId: 'user-evicted',
+          reason: 'PARTICIPANT_REMOVED',
+        }),
+      );
     });
   });
 });

@@ -196,3 +196,34 @@ export class SecurityEventDtoGql {
   @Field(() => String)
   createdAt!: string;
 }
+
+@InputType()
+export class RequestPasswordResetInput {
+  @Field(() => String)
+  @IsNotEmpty()
+  email!: string;
+}
+
+@InputType()
+export class ResetPasswordInput {
+  @Field(() => String)
+  @IsNotEmpty()
+  token!: string;
+
+  @Field(() => String)
+  @IsNotEmpty()
+  @MinLength(8)
+  newPassword!: string;
+}
+
+@ObjectType()
+export class PasswordResetResponseGql {
+  @Field(() => Boolean)
+  success!: boolean;
+
+  @Field(() => String)
+  message!: string;
+
+  @Field(() => String, { nullable: true })
+  resetToken?: string;
+}

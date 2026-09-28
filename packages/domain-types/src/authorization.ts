@@ -58,18 +58,40 @@ export enum PermissionAction {
   MESSAGE_EDIT = 'message.edit',
   MESSAGE_DELETE = 'message.delete',
 
-  // Calling
+  // Calling & Advanced Controls
+  CALL_CREATE = 'call.create',
   CALL_JOIN = 'call.join',
+  CALL_ANSWER = 'call.answer',
+  CALL_DECLINE = 'call.decline',
+  CALL_HOLD = 'call.hold',
   CALL_INVITE = 'call.invite',
   CALL_REMOVE_PARTICIPANT = 'call.remove_participant',
   CALL_MUTE_PARTICIPANT = 'call.mute_participant',
+  CALL_SCREEN_SHARE = 'call.screen_share',
   CALL_TRANSFER = 'call.transfer',
   CALL_END = 'call.end',
+  CALL_SWAP = 'call.swap',
+  CALL_MERGE = 'call.merge',
+  CALL_SPLIT = 'call.split',
+  CALL_SCHEDULE = 'call.schedule',
+  DEVICE_HANDOFF = 'call.device_handoff',
 
-  // Recording
+  // Conferencing & Rooms
+  CONFERENCE_CREATE = 'conference.create',
+  CONFERENCE_MANAGE = 'conference.manage',
+  CONFERENCE_MODERATE = 'conference.moderate',
+  CONFERENCE_LOCK = 'conference.lock',
+  ROOM_MANAGE = 'room.manage',
+  ROOM_MEMBER_MANAGE = 'room.member_manage',
+
+  // Recording & Consent & Transcripts
   RECORDING_START = 'recording.start',
   RECORDING_STOP = 'recording.stop',
+  RECORDING_PAUSE = 'recording.pause',
+  RECORDING_RESUME = 'recording.resume',
+  RECORDING_ACCESS = 'recording.access',
   RECORDING_DELETE = 'recording.delete',
+  TRANSCRIPTION_VIEW = 'transcription.view',
 
   // AI Assistant
   AI_READ = 'ai.read',
@@ -81,6 +103,25 @@ export enum PermissionAction {
   AI_MAKE_CALL = 'ai.make_call',
   AI_TRANSFER_CALL = 'ai.transfer_call',
   AI_END_CALL = 'ai.end_call',
+
+  // Telephony & PSTN & SIP
+  TELEPHONY_PSTN_CALL = 'telephony.pstn_call',
+  TELEPHONY_INTERNATIONAL_CALL = 'telephony.international_call',
+  TELEPHONY_NUMBER_PROVISION = 'telephony.number.provision',
+  TELEPHONY_NUMBER_ASSIGN = 'telephony.number.assign',
+  TELEPHONY_NUMBER_RELEASE = 'telephony.number.release',
+  TELEPHONY_ROUTING_MANAGE = 'telephony.routing.manage',
+  TELEPHONY_SIP_TRUNK_MANAGE = 'telephony.sip_trunk.manage',
+  TELEPHONY_VOICEMAIL_ACCESS = 'telephony.voicemail.access',
+  TELEPHONY_USAGE_READ = 'telephony.usage.read',
+
+  // AI Voice & Call Intelligence (Milestone 7)
+  AI_AGENT_MANAGE = 'ai.agent.manage',
+  AI_CALL_PARTICIPATE = 'ai.call.participate',
+  AI_CALL_OUTBOUND = 'ai.call.outbound',
+  AI_TOOLS_EXECUTE = 'ai.tools.execute',
+  AI_TRANSCRIPT_READ = 'ai.transcript.read',
+  AI_SUMMARIZE = 'ai.summarize',
 
   // Security & Admin
   SECURITY_VIEW_AUDIT = 'security.view_audit',

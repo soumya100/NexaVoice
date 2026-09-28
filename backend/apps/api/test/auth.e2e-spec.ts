@@ -16,6 +16,8 @@ describe('Authentication & Authorization (e2e)', () => {
   const usersDb = new Map<string, any>();
   const sessionsDb = new Map<string, any>();
   const devicesDb = new Map<string, any>();
+  const refreshFamiliesDb = new Map<string, any>();
+  const refreshTokensDb = new Map<string, any>();
   const securityEventsDb: any[] = [];
 
   beforeAll(async () => {
@@ -40,9 +42,15 @@ describe('Authentication & Authorization (e2e)', () => {
     };
     usersDb.set(preExistingUser.id, preExistingUser);
 
-    const mockPrisma = {
+    const mockPrisma: any = {
       isDatabaseConnected: jest.fn().mockReturnValue(true),
       ping: jest.fn().mockResolvedValue(true),
+      $transaction: jest.fn().mockImplementation(async (callbackOrOps) => {
+        if (typeof callbackOrOps === 'function') {
+          return callbackOrOps(mockPrisma);
+        }
+        return Promise.all(callbackOrOps);
+      }),
       user: {
         findFirst: jest.fn().mockImplementation(({ where }) => {
           for (const u of usersDb.values()) {
@@ -141,6 +149,90 @@ describe('Authentication & Authorization (e2e)', () => {
           return Promise.resolve(results);
         }),
       },
+      refreshTokenFamily: {
+        create: jest.fn().mockImplementation(({ data }) => {
+          const id = data.id || `family-${Date.now()}-${Math.random()}`;
+          const fam = {
+            id,
+            sessionId: data.sessionId,
+            createdAt: new Date(),
+            revokedAt: null,
+            revocationReason: null,
+          };
+          refreshFamiliesDb.set(id, fam);
+          return Promise.resolve(fam);
+        }),
+        update: jest.fn().mockImplementation(({ where, data }) => {
+          const fam = refreshFamiliesDb.get(where.id);
+          if (fam) Object.assign(fam, data);
+          return Promise.resolve(fam);
+        }),
+        updateMany: jest.fn().mockImplementation(({ where, data }) => {
+          let count = 0;
+          for (const fam of refreshFamiliesDb.values()) {
+            if (where.sessionId === fam.sessionId) {
+              Object.assign(fam, data);
+              count++;
+            }
+          }
+          return Promise.resolve({ count });
+        }),
+      },
+      refreshToken: {
+        create: jest.fn().mockImplementation(({ data }) => {
+          const id = data.id || `rt-${Date.now()}-${Math.random()}`;
+          const token = {
+            id,
+            ...data,
+            usedAt: null,
+            replacedByTokenId: null,
+            revokedAt: null,
+          };
+          refreshTokensDb.set(id, token);
+          return Promise.resolve(token);
+        }),
+        findUnique: jest.fn().mockImplementation(({ where, include }) => {
+          let found: any = null;
+          if (where.id) found = refreshTokensDb.get(where.id);
+          if (where.tokenHash) {
+            for (const t of refreshTokensDb.values()) {
+              if (t.tokenHash === where.tokenHash) {
+                found = t;
+                break;
+              }
+            }
+          }
+          if (found && include?.family) {
+            const fam = refreshFamiliesDb.get(found.familyId);
+            const famWithSession = fam
+              ? {
+                  ...fam,
+                  session: sessionsDb.get(fam.sessionId) || null,
+                }
+              : null;
+            return Promise.resolve({
+              ...found,
+              family: famWithSession,
+            });
+          }
+          return Promise.resolve(found || null);
+        }),
+        update: jest.fn().mockImplementation(({ where, data }) => {
+          const t = refreshTokensDb.get(where.id);
+          if (t) Object.assign(t, data);
+          return Promise.resolve(t);
+        }),
+        updateMany: jest.fn().mockImplementation(({ where, data }) => {
+          let count = 0;
+          for (const t of refreshTokensDb.values()) {
+            if (where.familyId && t.familyId === where.familyId) {
+              Object.assign(t, data);
+              count++;
+            }
+          }
+          return Promise.resolve({ count });
+        }),
+      },
       device: {
         upsert: jest.fn().mockImplementation(({ create }) => {
           const d = { id: `dev-${Date.now()}`, ...create };
@@ -186,6 +278,9 @@ describe('Authentication & Authorization (e2e)', () => {
           const ev = { id: `event-${Date.now()}`, ...data, createdAt: new Date() };
           securityEventsDb.push(ev);
           return Promise.resolve(ev);
+        }),
+        findFirst: jest.fn().mockImplementation(() => {
+          return Promise.resolve(securityEventsDb[securityEventsDb.length - 1] || null);
         }),
         findMany: jest.fn().mockImplementation(() => Promise.resolve(securityEventsDb)),
       },

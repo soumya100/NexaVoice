@@ -12,6 +12,7 @@ describe('MessagingService', () => {
   let mockContactsService: any;
   let mockAttachmentsService: any;
   let mockSignalingGateway: any;
+  let mockOutboxWorker: any;
 
   beforeEach(() => {
     mockSecurityAudit = {
@@ -58,7 +59,16 @@ describe('MessagingService', () => {
       messageReport: {
         create: jest.fn(),
       },
+      outboxEvent: {
+        create: jest.fn().mockResolvedValue({ id: 'outbox-1' }),
+        update: jest.fn(),
+        findMany: jest.fn(),
+      },
       $transaction: jest.fn((cb) => cb(mockPrisma)),
+    };
+
+    mockOutboxWorker = {
+      drainPendingEvents: jest.fn().mockResolvedValue({ processedCount: 0, failedCount: 0, deadLetterCount: 0 }),
     };
 
     service = new MessagingService(
@@ -67,6 +77,7 @@ describe('MessagingService', () => {
       mockContactsService,
       mockAttachmentsService,
       mockSignalingGateway,
+      mockOutboxWorker,
     );
   });
 
@@ -161,11 +172,15 @@ describe('MessagingService', () => {
 
       expect(message.id).toBe('msg-new-1');
       expect(message.sequenceNumber).toBe(43);
-      expect(mockSignalingGateway.broadcastToConversation).toHaveBeenCalledWith(
-        'conv-1',
-        'conversation.message.created',
-        expect.objectContaining({ id: 'msg-new-1', sequenceNumber: 43 }),
+      expect(mockPrisma.outboxEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            aggregateId: 'conv-1',
+            eventType: 'conversation.message.created',
+          }),
+        }),
       );
+      expect(mockOutboxWorker.drainPendingEvents).toHaveBeenCalled();
     });
   });
 

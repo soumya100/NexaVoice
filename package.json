@@ -17,9 +17,9 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "docker:dev": "docker compose -f infrastructure/docker/docker-compose.dev.yml up -d",
     "docker:down": "docker compose -f infrastructure/docker/docker-compose.dev.yml down",
-    "prisma:generate": "npm run prisma:generate --workspace=@nexavoice/database",
-    "prisma:migrate": "npm run prisma:migrate --workspace=@nexavoice/database",
-    "prisma:studio": "npm run prisma:studio --workspace=@nexavoice/database",
+    "prisma:generate": "prisma generate --schema=database/prisma/schema.prisma",
+    "prisma:migrate": "prisma migrate dev --schema=database/prisma/schema.prisma",
+    "prisma:studio": "prisma studio --schema=database/prisma/schema.prisma",
     "start:api": "npm run start:dev --workspace=@nexavoice/api",
     "start:web": "npm run dev --workspace=@nexavoice/web"
   },

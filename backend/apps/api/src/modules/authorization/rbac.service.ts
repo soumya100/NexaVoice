@@ -21,11 +21,32 @@ export const ROLE_PERMISSIONS_MAP: Record<SystemRole, PermissionAction[]> = {
     PermissionAction.MESSAGE_SEND,
     PermissionAction.MESSAGE_EDIT,
     PermissionAction.MESSAGE_DELETE,
+    // Calling & Conferencing permissions
+    PermissionAction.CALL_CREATE,
     PermissionAction.CALL_JOIN,
+    PermissionAction.CALL_ANSWER,
+    PermissionAction.CALL_DECLINE,
+    PermissionAction.CALL_HOLD,
     PermissionAction.CALL_INVITE,
+    PermissionAction.CALL_SCREEN_SHARE,
+    PermissionAction.CALL_TRANSFER,
     PermissionAction.CALL_END,
+    PermissionAction.CALL_SWAP,
+    PermissionAction.CALL_MERGE,
+    PermissionAction.CALL_SPLIT,
+    PermissionAction.CALL_SCHEDULE,
+    PermissionAction.DEVICE_HANDOFF,
+    PermissionAction.CONFERENCE_CREATE,
+    PermissionAction.CONFERENCE_MANAGE,
+    PermissionAction.ROOM_MANAGE,
+    // Recording & Transcripts
     PermissionAction.RECORDING_START,
     PermissionAction.RECORDING_STOP,
+    PermissionAction.RECORDING_PAUSE,
+    PermissionAction.RECORDING_RESUME,
+    PermissionAction.RECORDING_ACCESS,
+    PermissionAction.TRANSCRIPTION_VIEW,
+    // AI Assistant
     PermissionAction.AI_READ,
     PermissionAction.AI_CONFIGURE,
     PermissionAction.AI_LISTEN,
@@ -35,6 +56,7 @@ export const ROLE_PERMISSIONS_MAP: Record<SystemRole, PermissionAction[]> = {
     PermissionAction.AI_MAKE_CALL,
     PermissionAction.AI_TRANSFER_CALL,
     PermissionAction.AI_END_CALL,
+    // Security
     PermissionAction.SECURITY_MANAGE_SESSIONS,
   ],
   [SystemRole.ROOM_HOST]: [
@@ -86,19 +108,21 @@ export class RbacService implements OnModuleInit {
    */
   async ensureBaselineRolesAndPermissions(): Promise<void> {
     try {
-      // 1. Seed all PermissionAction enum items
-      for (const action of Object.values(PermissionAction)) {
-        const [module] = action.split('.');
-        await this.prisma.permission.upsert({
-          where: { action },
-          create: {
-            action,
-            module: module || 'core',
-            description: `Capability for ${action}`,
-          },
-          update: {},
-        });
-      }
+      // 1. Seed all PermissionAction enum items in parallel
+      await Promise.all(
+        Object.values(PermissionAction).map(async (action) => {
+          const [module] = action.split('.');
+          return this.prisma.permission.upsert({
+            where: { action },
+            create: {
+              action,
+              module: module || 'core',
+              description: `Capability for ${action}`,
+            },
+            update: {},
+          });
+        }),
+      );
 
       // 2. Seed all SystemRole enum items and their RolePermission mappings
       for (const roleName of Object.values(SystemRole)) {
@@ -113,10 +137,13 @@ export class RbacService implements OnModuleInit {
         });
 
         const actions = ROLE_PERMISSIONS_MAP[roleName] || [];
-        for (const action of actions) {
-          const perm = await this.prisma.permission.findUnique({ where: { action } });
-          if (perm) {
-            await this.prisma.rolePermission.upsert({
+        const perms = await this.prisma.permission.findMany({
+          where: { action: { in: actions } },
+        });
+
+        await Promise.all(
+          perms.map((perm) =>
+            this.prisma.rolePermission.upsert({
               where: {
                 roleId_permissionId: {
                   roleId: role.id,
@@ -128,11 +155,11 @@ export class RbacService implements OnModuleInit {
                 permissionId: perm.id,
               },
               update: {},
-            });
-          }
-        }
+            }),
+          ),
+        );
       }
-      this.logger.log('Baseline RBAC roles and permissions verified');
+      this.logger.log('Baseline RBAC roles and permissions verified and synchronized');
     } catch (err) {
       this.logger.warn({
         message: 'Could not sync baseline RBAC roles at startup',
@@ -178,6 +205,11 @@ export class RbacService implements OnModuleInit {
         rolesSet.add(assignment.role.name);
         for (const rp of assignment.role.permissions) {
           permissionsSet.add(rp.permission.action);
+        }
+        // Baseline guarantee for system roles
+        const baseline = ROLE_PERMISSIONS_MAP[assignment.role.name as SystemRole];
+        if (baseline) {
+          baseline.forEach((p) => permissionsSet.add(p));
         }
       }
     }

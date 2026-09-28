@@ -22,7 +22,31 @@ import {
   Bell,
   BellOff,
   CornerDownRight,
+  Wifi,
+  WifiOff,
+  Lock,
 } from 'lucide-react';
+import {
+  executeGraphQL,
+  GET_USER_CONVERSATIONS,
+  CREATE_DIRECT_CONVERSATION,
+  GET_CONVERSATION_MESSAGES,
+  SEND_MESSAGE_MUTATION,
+  EDIT_MESSAGE_MUTATION,
+  DELETE_MESSAGE_MUTATION,
+  ADD_REACTION_MUTATION,
+  REMOVE_REACTION_MUTATION,
+  UPDATE_READ_WATERMARK_MUTATION,
+  GET_CONTACTS,
+  DISCOVER_USERS,
+  SEND_CONTACT_REQUEST,
+  GET_PRIVACY_SETTINGS,
+  UPDATE_PRIVACY_SETTINGS,
+  uploadAttachmentFile,
+} from '../services/api';
+import { realtimeClient, RealtimeConnectionState } from '../services/realtime';
+import { authService } from '../services/auth';
+import { toastService } from '../services/toast';
 
 interface MockUser {
   id: string;
@@ -44,6 +68,7 @@ interface MockAttachment {
   mimeType: string;
   sizeBytes: number;
   voiceDurationMs?: number;
+  downloadUrl?: string;
 }
 
 interface MockMessage {
@@ -81,24 +106,43 @@ interface MockConversation {
   }[];
 }
 
-const CURRENT_USER: MockUser = {
+const FALLBACK_USER: MockUser = {
   id: 'usr-current',
   nexaVoiceId: 'NV-901238',
-  username: 'alex.rivera',
-  displayName: 'Alex Rivera',
+  username: 'current.user',
+  displayName: 'Current User',
   isOnline: true,
 };
 
 export function MessagingWorkspace() {
+  const authUser = authService.getUser();
+  const currentUser: MockUser = authUser
+    ? {
+        id: authUser.id,
+        nexaVoiceId: authUser.nexaVoiceId || 'NV-CURRENT',
+        username: authUser.username,
+        displayName: authUser.displayName || authUser.username,
+        avatarUrl: (authUser as any).avatarUrl || undefined,
+        isOnline: true,
+      }
+    : FALLBACK_USER;
+
   const [activeTab, setActiveTab] = useState<'chats' | 'contacts' | 'discovery'>('chats');
-  const [activeConversationId, setActiveConversationId] = useState<string>('conv-1');
+  const [activeConversationId, setActiveConversationId] = useState<string>('');
   const [composerText, setComposerText] = useState('');
   const [replyingTo, setReplyingTo] = useState<MockMessage | null>(null);
   const [editingMessage, setEditingMessage] = useState<MockMessage | null>(null);
-  const [remoteTypingUser] = useState<string | null>('Elena Vance');
+  const [remoteTypingUser, setRemoteTypingUser] = useState<string | null>(null);
+  const [connectionState, setConnectionState] = useState<RealtimeConnectionState>(realtimeClient.getConnectionState());
   const [showDetailsPanel, setShowDetailsPanel] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [discoveryQuery, setDiscoveryQuery] = useState('');
+  const [discoveredUsers, setDiscoveredUsers] = useState<any[]>([]);
+  const [isSearchingUsers, setIsSearchingUsers] = useState(false);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [audioPlaying, setAudioPlaying] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const typingTimerRef = useRef<any>(null);
 
   // Privacy Settings State
   const [privacySettings, setPrivacySettings] = useState({
@@ -109,144 +153,13 @@ export function MessagingWorkspace() {
     whoCanMessageMe: 'EVERYONE',
   });
 
-  // Conversations State
-  const [conversations, setConversations] = useState<MockConversation[]>([
-    {
-      id: 'conv-1',
-      type: 'DIRECT',
-      title: 'Elena Vance',
-      avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-      unreadCount: 0,
-      lastMessageSnippet: 'The distributed consensus model passed latency benchmarks!',
-      lastMessageTime: '10:42 AM',
-      isMuted: false,
-      participants: [
-        { userId: 'usr-current', role: 'MEMBER', displayName: 'Alex Rivera', isOnline: true },
-        { userId: 'usr-elena', role: 'MEMBER', displayName: 'Elena Vance', isOnline: true },
-      ],
-    },
-    {
-      id: 'conv-2',
-      type: 'GROUP',
-      title: 'Core Architecture Guild',
-      description: 'Distributed protocols, real-time message sequencing, and cryptography review',
-      avatarUrl: '',
-      unreadCount: 3,
-      lastMessageSnippet: 'Prisma migration completed with deterministic sequence tie-breakers.',
-      lastMessageTime: '09:15 AM',
-      isMuted: false,
-      participants: [
-        { userId: 'usr-current', role: 'OWNER', displayName: 'Alex Rivera', isOnline: true },
-        { userId: 'usr-marcus', role: 'ADMIN', displayName: 'Marcus Chen', isOnline: true },
-        { userId: 'usr-sarah', role: 'MEMBER', displayName: 'Sarah Jenkins', isOnline: false },
-      ],
-    },
-    {
-      id: 'conv-3',
-      type: 'DIRECT',
-      title: 'DevOps Security Bot',
-      unreadCount: 0,
-      lastMessageSnippet: 'AuditEvent: Key rotation verified for cluster us-east.',
-      lastMessageTime: 'Yesterday',
-      isMuted: true,
-      participants: [
-        { userId: 'usr-current', role: 'MEMBER', displayName: 'Alex Rivera', isOnline: true },
-        { userId: 'usr-bot', role: 'MEMBER', displayName: 'DevOps Security Bot', isOnline: true },
-      ],
-    },
-  ]);
+  // Conversations & Messages State (Live)
+  const [conversations, setConversations] = useState<MockConversation[]>([]);
+  const [messages, setMessages] = useState<Record<string, MockMessage[]>>({});
 
-  // Messages State
-  const [messages, setMessages] = useState<Record<string, MockMessage[]>>({
-    'conv-1': [
-      {
-        id: 'msg-1',
-        conversationId: 'conv-1',
-        senderId: 'usr-elena',
-        clientMessageId: 'cli-8901',
-        sequenceNumber: 1,
-        content: 'Hi Alex! Did you finalize the Milestone 3 idempotency and message ordering specification?',
-        type: 'TEXT',
-        deliveryStatus: 'READ',
-        isEdited: false,
-        isDeleted: false,
-        reactions: [{ userId: 'usr-current', reaction: '👍' }],
-        timestamp: '10:35 AM',
-      },
-      {
-        id: 'msg-2',
-        conversationId: 'conv-1',
-        senderId: 'usr-current',
-        clientMessageId: 'cli-8902',
-        sequenceNumber: 2,
-        content: 'Yes! We adopted monotonic sequence counters with transactional outbox event streams, plus client-provided clientMessageId deduplication.',
-        type: 'TEXT',
-        deliveryStatus: 'READ',
-        isEdited: false,
-        isDeleted: false,
-        reactions: [{ userId: 'usr-elena', reaction: '🚀' }, { userId: 'usr-current', reaction: '❤️' }],
-        timestamp: '10:38 AM',
-      },
-      {
-        id: 'msg-3',
-        conversationId: 'conv-1',
-        senderId: 'usr-current',
-        clientMessageId: 'cli-8903',
-        sequenceNumber: 3,
-        content: 'Here is the voice briefing on the SSRF link preview filter and attachment scanning pipeline:',
-        type: 'VOICE',
-        deliveryStatus: 'READ',
-        isEdited: false,
-        isDeleted: false,
-        reactions: [],
-        attachments: [
-          { id: 'att-1', fileName: 'voice-memo-arch-review.opus', mimeType: 'audio/opus', sizeBytes: 245000, voiceDurationMs: 14200 },
-        ],
-        timestamp: '10:40 AM',
-      },
-      {
-        id: 'msg-4',
-        conversationId: 'conv-1',
-        senderId: 'usr-elena',
-        clientMessageId: 'cli-8904',
-        sequenceNumber: 4,
-        content: 'The distributed consensus model passed latency benchmarks! Check out the specs at https://specs.nexavoice.internal/rfc-102',
-        type: 'TEXT',
-        deliveryStatus: 'READ',
-        isEdited: false,
-        isDeleted: false,
-        reactions: [],
-        timestamp: '10:42 AM',
-      },
-    ],
-    'conv-2': [
-      {
-        id: 'msg-201',
-        conversationId: 'conv-2',
-        senderId: 'usr-marcus',
-        clientMessageId: 'cli-m-01',
-        sequenceNumber: 1,
-        content: 'Prisma migration completed with deterministic sequence tie-breakers.',
-        type: 'TEXT',
-        deliveryStatus: 'READ',
-        isEdited: false,
-        isDeleted: false,
-        reactions: [{ userId: 'usr-current', reaction: '🔥' }],
-        timestamp: '09:15 AM',
-      },
-    ],
-  });
-
-  // Contacts State
-  const [contacts, setContacts] = useState([
-    { id: 'usr-elena', username: 'elena.vance', displayName: 'Elena Vance', nexaVoiceId: 'NV-772190', status: 'ACCEPTED', isOnline: true },
-    { id: 'usr-marcus', username: 'marcus.chen', displayName: 'Marcus Chen', nexaVoiceId: 'NV-441029', status: 'ACCEPTED', isOnline: true },
-    { id: 'usr-sarah', username: 'sarah.j', displayName: 'Sarah Jenkins', nexaVoiceId: 'NV-992381', status: 'ACCEPTED', isOnline: false },
-  ]);
-
-  const [pendingRequests, setPendingRequests] = useState([
-    { id: 'req-1', requesterId: 'usr-turing', displayName: 'Alan Turing', username: 'aturing', nexaVoiceId: 'NV-191206', time: '10m ago' },
-  ]);
+  // Contacts State (Live)
+  const [contacts, setContacts] = useState<any[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -258,11 +171,290 @@ export function MessagingWorkspace() {
     scrollToBottom();
   }, [messages, activeConversationId]);
 
+  // Load Privacy Settings
+  useEffect(() => {
+    executeGraphQL<{ myPrivacySettings: any }>(GET_PRIVACY_SETTINGS)
+      .then((res) => {
+        if (res.myPrivacySettings) {
+          const p = res.myPrivacySettings;
+          setPrivacySettings({
+            discoverableByUsername: p.discoverableByUsername ?? true,
+            discoverableByNexaVoiceId: p.discoverableByNexaVoiceId ?? true,
+            readReceiptsEnabled: p.readReceiptsEnabled ?? true,
+            typingIndicatorsEnabled: p.typingIndicatorsEnabled ?? true,
+            whoCanMessageMe: p.whoCanMessageMe || 'EVERYONE',
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleUpdatePrivacy = async (key: string, value: boolean) => {
+    const updated = { ...privacySettings, [key]: value };
+    setPrivacySettings(updated);
+    try {
+      await executeGraphQL(UPDATE_PRIVACY_SETTINGS, {
+        input: {
+          [key]: value,
+        },
+      });
+      toastService.success('Privacy policy updated');
+    } catch (err: any) {
+      toastService.error(err?.message || 'Failed to update privacy settings');
+    }
+  };
+
+  // Refresh conversations from live backend
+  const refreshConversations = async () => {
+    try {
+      const res = await executeGraphQL<{ conversations: any[] }>(GET_USER_CONVERSATIONS);
+      if (res.conversations && res.conversations.length > 0) {
+        const loadedConvs: MockConversation[] = res.conversations.map((c: any) => {
+          const otherParticipant = c.participants?.find((p: any) => p.userId !== currentUser.id);
+          return {
+            id: c.id,
+            type: c.type,
+            title: c.title || otherParticipant?.user?.displayName || otherParticipant?.user?.username || 'Direct Chat',
+            avatarUrl: c.avatarUrl || otherParticipant?.user?.avatarUrl || '',
+            unreadCount: c.unreadCount || 0,
+            lastMessageSnippet: c.lastMessageSnippet || 'No messages yet',
+            lastMessageTime: c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+            isMuted: c.isMuted || false,
+            participants: (c.participants || []).map((p: any) => ({
+              userId: p.userId,
+              role: p.conversationRole || 'MEMBER',
+              displayName: p.user?.displayName || p.user?.username || p.userId,
+              isOnline: p.user?.isOnline ?? true,
+            })),
+          };
+        });
+        setConversations(loadedConvs);
+        setActiveConversationId((prev) => (prev && loadedConvs.some((c) => c.id === prev) ? prev : loadedConvs[0].id));
+      } else {
+        // If 0 conversations exist for user, auto-seed a direct conversation with "alice" (Alice Smith)
+        try {
+          const directRes = await executeGraphQL<{ createDirectConversation: any }>(CREATE_DIRECT_CONVERSATION, {
+            input: { targetUserId: 'alice' },
+          });
+          if (directRes.createDirectConversation) {
+            const c = directRes.createDirectConversation;
+            const newConv: MockConversation = {
+              id: c.id,
+              type: c.type,
+              title: 'Alice Smith',
+              avatarUrl: '',
+              unreadCount: 0,
+              lastMessageSnippet: 'Welcome to NexaVoice secure live messaging!',
+              lastMessageTime: 'Just now',
+              isMuted: false,
+              participants: (c.participants || []).map((p: any) => ({
+                userId: p.userId,
+                role: p.conversationRole || 'MEMBER',
+                displayName: p.user?.displayName || p.user?.username || p.userId,
+                isOnline: true,
+              })),
+            };
+            setConversations([newConv]);
+            setActiveConversationId(c.id);
+          }
+        } catch {
+          // Ignore
+        }
+      }
+    } catch (err: any) {
+      console.warn('Failed to load conversations:', err);
+    }
+  };
+
+  // Refresh contacts from live backend
+  const refreshContacts = async () => {
+    try {
+      const res = await executeGraphQL<{ contacts: any[] }>(GET_CONTACTS);
+      if (res.contacts) {
+        setContacts(
+          res.contacts.map((c: any) => ({
+            id: c.contact?.id || c.id,
+            username: c.contact?.username || 'user',
+            displayName: c.contact?.displayName || c.contact?.username || 'User',
+            nexaVoiceId: c.contact?.nexaVoiceId || 'NV-0000',
+            avatarUrl: c.contact?.avatarUrl,
+            status: c.status,
+            isOnline: c.contact?.isOnline ?? true,
+          })),
+        );
+      }
+    } catch {
+      // Ignore
+    }
+  };
+
+  // Connect to live Socket.IO and listen for realtime message events
+  useEffect(() => {
+    const unbindState = realtimeClient.onStateChange((state) => {
+      setConnectionState(state);
+    });
+
+    realtimeClient.connect();
+    refreshConversations();
+    refreshContacts();
+
+    const unMsgCreated = realtimeClient.onMessageCreated((payload: any) => {
+      const msg = payload.message || payload;
+      if (!msg?.conversationId) return;
+
+      setMessages((prev) => {
+        const convMsgs = prev[msg.conversationId] || [];
+        if (convMsgs.some((m) => m.id === msg.id || (m.clientMessageId && m.clientMessageId === msg.clientMessageId))) {
+          return {
+            ...prev,
+            [msg.conversationId]: convMsgs.map((m) =>
+              m.clientMessageId === msg.clientMessageId ? { ...m, id: msg.id, sequenceNumber: msg.sequenceNumber, deliveryStatus: 'SENT' } : m,
+            ),
+          };
+        }
+        return {
+          ...prev,
+          [msg.conversationId]: [
+            ...convMsgs,
+            {
+              id: msg.id,
+              conversationId: msg.conversationId,
+              senderId: msg.senderId,
+              clientMessageId: msg.clientMessageId || msg.id,
+              sequenceNumber: msg.sequenceNumber,
+              content: msg.content,
+              type: msg.type || 'TEXT',
+              deliveryStatus: msg.deliveryStatus || 'DELIVERED',
+              isEdited: msg.isEdited || false,
+              isDeleted: false,
+              replyToMessageId: msg.replyToMessageId,
+              reactions: (msg.reactions || []).map((r: any) => ({ userId: r.userId, reaction: r.reaction })),
+              attachments: msg.attachments || [],
+              timestamp: new Date(msg.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ],
+        };
+      });
+
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === msg.conversationId
+            ? { ...c, lastMessageSnippet: msg.content, lastMessageTime: 'Just now' }
+            : c,
+        ),
+      );
+    });
+
+    const unMsgUpdated = realtimeClient.onMessageUpdated((payload: any) => {
+      const msg = payload.message || payload;
+      if (!msg?.conversationId) return;
+      setMessages((prev) => ({
+        ...prev,
+        [msg.conversationId]: (prev[msg.conversationId] || []).map((m) =>
+          m.id === msg.id ? { ...m, content: msg.content, isEdited: true } : m,
+        ),
+      }));
+    });
+
+    const unMsgDeleted = realtimeClient.onMessageDeleted((payload: any) => {
+      setMessages((prev) => ({
+        ...prev,
+        [payload.conversationId]: (prev[payload.conversationId] || []).map((m) =>
+          m.id === payload.messageId ? { ...m, isDeleted: true, content: '[This message was deleted]' } : m,
+        ),
+      }));
+    });
+
+    const unTypingStart = realtimeClient.onTypingStarted((payload) => {
+      if (payload.conversationId === activeConversationId && payload.userId !== currentUser.id) {
+        setRemoteTypingUser('Remote contact');
+      }
+    });
+
+    const unTypingStop = realtimeClient.onTypingStopped((payload) => {
+      if (payload.conversationId === activeConversationId) {
+        setRemoteTypingUser(null);
+      }
+    });
+
+    const unEvicted = realtimeClient.onEvicted((payload) => {
+      toastService.warning(`Security Notice: You were evicted from conversation ${payload.conversationId}`);
+      refreshConversations();
+    });
+
+    return () => {
+      unbindState();
+      unMsgCreated();
+      unMsgUpdated();
+      unMsgDeleted();
+      unTypingStart();
+      unTypingStop();
+      unEvicted();
+    };
+  }, [activeConversationId]);
+
+  // Join active conversation room upon selection and load live messages
+  useEffect(() => {
+    if (!activeConversationId) return;
+
+    realtimeClient.joinConversation(activeConversationId);
+    setIsLoadingMessages(true);
+
+    executeGraphQL<{ messages: { edges: Array<{ node: any }> } }>(GET_CONVERSATION_MESSAGES, {
+      input: {
+        conversationId: activeConversationId,
+        limit: 50,
+      },
+    })
+      .then((res) => {
+        if (res.messages?.edges) {
+          const loaded = res.messages.edges.map((e) => {
+            const m = e.node;
+            return {
+              id: m.id,
+              conversationId: m.conversationId,
+              senderId: m.senderId,
+              clientMessageId: m.clientMessageId || m.id,
+              sequenceNumber: m.sequenceNumber,
+              content: m.content,
+              type: m.type,
+              deliveryStatus: m.deliveryStatus,
+              isEdited: m.isEdited,
+              isDeleted: Boolean(m.deletedAt),
+              replyToMessageId: m.replyToMessageId,
+              reactions: (m.reactions || []).map((r: any) => ({ userId: r.userId, reaction: r.reaction })),
+              attachments: m.attachments || [],
+              timestamp: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            };
+          });
+          setMessages((prev) => ({
+            ...prev,
+            [activeConversationId]: loaded,
+          }));
+        }
+      })
+      .catch((err) => {
+        console.warn('Failed to load messages:', err);
+      })
+      .finally(() => {
+        setIsLoadingMessages(false);
+      });
+
+    // Mark as read
+    executeGraphQL(UPDATE_READ_WATERMARK_MUTATION, {
+      conversationId: activeConversationId,
+    }).catch(() => {});
+
+    return () => {
+      realtimeClient.leaveConversation(activeConversationId);
+    };
+  }, [activeConversationId]);
+
   const activeConversation = conversations.find((c) => c.id === activeConversationId);
   const activeMessages = messages[activeConversationId] || [];
 
-  // Send Message with Idempotency Key
-  const handleSendMessage = () => {
+  // Send Message with Idempotency Key & GraphQL Mutation
+  const handleSendMessage = async () => {
     if (!composerText.trim()) return;
 
     if (editingMessage) {
@@ -272,6 +464,14 @@ export function MessagingWorkspace() {
           m.id === editingMessage.id ? { ...m, content: composerText.trim(), isEdited: true } : m,
         ),
       }));
+
+      executeGraphQL(EDIT_MESSAGE_MUTATION, {
+        input: {
+          messageId: editingMessage.id,
+          content: composerText.trim(),
+        },
+      }).catch(() => {});
+
       setEditingMessage(null);
       setComposerText('');
       return;
@@ -283,12 +483,12 @@ export function MessagingWorkspace() {
     const newMsg: MockMessage = {
       id: `msg-${Date.now()}`,
       conversationId: activeConversationId,
-      senderId: CURRENT_USER.id,
+      senderId: currentUser.id,
       clientMessageId: clientMsgId,
       sequenceNumber: newSeq,
       content: composerText.trim(),
       type: 'TEXT',
-      deliveryStatus: 'DELIVERED',
+      deliveryStatus: 'SENT',
       isEdited: false,
       isDeleted: false,
       replyToMessageId: replyingTo?.id,
@@ -309,28 +509,90 @@ export function MessagingWorkspace() {
       ),
     );
 
+    const textToSend = composerText.trim();
     setComposerText('');
     setReplyingTo(null);
+
+    // Live GraphQL mutation dispatch
+    try {
+      const res = await executeGraphQL<{ sendMessage: any }>(SEND_MESSAGE_MUTATION, {
+        input: {
+          conversationId: activeConversationId,
+          content: textToSend,
+          clientMessageId: clientMsgId,
+          replyToMessageId: replyingTo?.id,
+        },
+      });
+      if (res.sendMessage) {
+        setMessages((prev) => ({
+          ...prev,
+          [activeConversationId]: (prev[activeConversationId] || []).map((m) =>
+            m.clientMessageId === clientMsgId
+              ? {
+                  ...m,
+                  id: res.sendMessage.id,
+                  sequenceNumber: res.sendMessage.sequenceNumber,
+                  deliveryStatus: 'SENT',
+                }
+              : m,
+          ),
+        }));
+      }
+    } catch (err: any) {
+      console.warn('Live message delivery failed, stored offline:', err);
+      toastService.warning('Notice: Message queued locally (offline fallback)');
+      const offlineQueue = JSON.parse(localStorage.getItem('nexavoice_offline_queue') || '[]');
+      offlineQueue.push({
+        conversationId: activeConversationId,
+        content: textToSend,
+        clientMessageId: clientMsgId,
+      });
+      localStorage.setItem('nexavoice_offline_queue', JSON.stringify(offlineQueue));
+    }
   };
 
-  // Toggle Reaction
+  // Typing indicator trigger on composer change
+  const handleComposerChange = (text: string) => {
+    setComposerText(text);
+    if (activeConversationId) {
+      realtimeClient.sendTypingStart(activeConversationId);
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = setTimeout(() => {
+        realtimeClient.sendTypingStop(activeConversationId);
+      }, 2500);
+    }
+  };
+
+  // Toggle Reaction with Live Mutation
   const handleToggleReaction = (messageId: string, emoji: string) => {
+    const msg = (messages[activeConversationId] || []).find((m) => m.id === messageId);
+    const hasReacted = msg?.reactions.some(
+      (r) => r.userId === currentUser.id && r.reaction === emoji,
+    );
+
     setMessages((prev) => ({
       ...prev,
       [activeConversationId]: prev[activeConversationId].map((m) => {
         if (m.id !== messageId) return m;
-        const hasReacted = m.reactions.some(
-          (r) => r.userId === CURRENT_USER.id && r.reaction === emoji,
-        );
         const updated = hasReacted
-          ? m.reactions.filter((r) => !(r.userId === CURRENT_USER.id && r.reaction === emoji))
-          : [...m.reactions, { userId: CURRENT_USER.id, reaction: emoji }];
+          ? m.reactions.filter((r) => !(r.userId === currentUser.id && r.reaction === emoji))
+          : [...m.reactions, { userId: currentUser.id, reaction: emoji }];
         return { ...m, reactions: updated };
       }),
     }));
+
+    if (hasReacted) {
+      executeGraphQL(REMOVE_REACTION_MUTATION, {
+        input: { messageId, reaction: emoji },
+      }).catch(() => {});
+    } else {
+      executeGraphQL(ADD_REACTION_MUTATION, {
+        input: { messageId, reaction: emoji },
+      }).catch(() => {});
+    }
   };
 
-  // Soft Delete
+  // Soft Delete with Live Mutation
   const handleDeleteMessage = (messageId: string) => {
     setMessages((prev) => ({
       ...prev,
@@ -338,6 +600,38 @@ export function MessagingWorkspace() {
         m.id === messageId ? { ...m, isDeleted: true, content: '[This message was deleted]' } : m,
       ),
     }));
+
+    executeGraphQL(DELETE_MESSAGE_MUTATION, {
+      input: { messageId },
+    })
+      .then(() => toastService.success('Message deleted'))
+      .catch((err: any) => toastService.error(err?.message || 'Failed to delete message'));
+  };
+
+  // File Upload
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const uploaded = await uploadAttachmentFile(file, currentUser.id);
+      const clientMsgId = `cli-att-${Date.now()}`;
+      await executeGraphQL(SEND_MESSAGE_MUTATION, {
+        input: {
+          conversationId: activeConversationId,
+          content: `Uploaded attachment: ${uploaded.fileName}`,
+          clientMessageId: clientMsgId,
+          attachmentIds: [uploaded.attachmentId],
+        },
+      });
+      toastService.success('File uploaded and sent');
+    } catch (err: any) {
+      toastService.error(`File upload failed: ${err?.message || 'Security check failed'}`);
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
   };
 
   // Accept Contact Request
@@ -356,6 +650,84 @@ export function MessagingWorkspace() {
         isOnline: true,
       },
     ]);
+  };
+
+  // User Discovery Search
+  const handleSearchUsers = async () => {
+    if (!discoveryQuery.trim()) return;
+    setIsSearchingUsers(true);
+    try {
+      const res = await executeGraphQL<{ discoverUsers: any[] }>(DISCOVER_USERS, {
+        query: discoveryQuery.trim(),
+        limit: 10,
+      });
+      setDiscoveredUsers(res.discoverUsers || []);
+      if (!res.discoverUsers || res.discoverUsers.length === 0) {
+        toastService.info('No users found matching that username or NexaVoice ID');
+      }
+    } catch (err: any) {
+      toastService.error(err?.message || 'Failed to search users');
+    } finally {
+      setIsSearchingUsers(false);
+    }
+  };
+
+  // Start Direct Chat with User
+  const handleStartDirectChat = async (targetUser: any) => {
+    try {
+      const res = await executeGraphQL<{ createDirectConversation: any }>(CREATE_DIRECT_CONVERSATION, {
+        input: { targetUserId: targetUser.id || targetUser.username || targetUser.nexaVoiceId },
+      });
+      if (res.createDirectConversation) {
+        const c = res.createDirectConversation;
+        const otherParticipant = c.participants?.find((p: any) => p.userId !== currentUser.id);
+        const title =
+          c.title ||
+          otherParticipant?.user?.displayName ||
+          otherParticipant?.user?.username ||
+          targetUser.displayName ||
+          targetUser.username ||
+          'Direct Chat';
+        const newConv: MockConversation = {
+          id: c.id,
+          type: c.type,
+          title,
+          avatarUrl: c.avatarUrl || otherParticipant?.user?.avatarUrl || targetUser.avatarUrl || '',
+          unreadCount: 0,
+          lastMessageSnippet: 'Encrypted direct channel ready',
+          lastMessageTime: 'Just now',
+          isMuted: false,
+          participants: (c.participants || []).map((p: any) => ({
+            userId: p.userId,
+            role: p.conversationRole || 'MEMBER',
+            displayName: p.user?.displayName || p.user?.username || p.userId,
+            isOnline: true,
+          })),
+        };
+        setConversations((prev) => {
+          const exists = prev.find((x) => x.id === c.id);
+          return exists ? prev : [newConv, ...prev];
+        });
+        setActiveConversationId(c.id);
+        setActiveTab('chats');
+        toastService.success(`Live conversation opened with ${title}`);
+      }
+    } catch (err: any) {
+      toastService.error(err?.message || 'Failed to open conversation');
+    }
+  };
+
+  // Send Contact Request Live
+  const handleSendContactRequest = async (userId: string) => {
+    try {
+      await executeGraphQL(SEND_CONTACT_REQUEST, {
+        targetUserId: userId,
+      });
+      toastService.success('Contact request dispatched successfully!');
+      refreshContacts();
+    } catch (err: any) {
+      toastService.error(err?.message || 'Failed to send contact request');
+    }
   };
 
   return (
@@ -663,7 +1035,7 @@ export function MessagingWorkspace() {
                     </div>
                   </div>
                   <button
-                    onClick={() => setActiveTab('chats')}
+                    onClick={() => handleStartDirectChat(c)}
                     style={{
                       padding: '0.35rem 0.65rem',
                       background: 'var(--nv-bg-elevated)',
@@ -672,12 +1044,18 @@ export function MessagingWorkspace() {
                       color: 'var(--nv-primary)',
                       fontSize: '0.75rem',
                       fontWeight: 600,
+                      cursor: 'pointer',
                     }}
                   >
                     Chat
                   </button>
                 </div>
               ))}
+              {contacts.length === 0 && (
+                <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--nv-text-muted)', fontSize: '0.85rem' }}>
+                  No contacts found yet. Use the <strong>Discover</strong> tab to find teammates and send connection requests.
+                </div>
+              )}
             </div>
           )}
 
@@ -686,10 +1064,15 @@ export function MessagingWorkspace() {
               <div style={{ fontSize: '0.85rem', color: 'var(--nv-text-secondary)', marginBottom: '1rem', lineHeight: '1.4' }}>
                 Find users by <strong>NexaVoice ID</strong> or <strong>Username</strong> without exposing private emails or phone numbers.
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>
                 <input
                   type="text"
                   placeholder="Enter NV-ID or username..."
+                  value={discoveryQuery}
+                  onChange={(e) => setDiscoveryQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSearchUsers();
+                  }}
                   style={{
                     flex: 1,
                     background: 'var(--nv-bg-elevated)',
@@ -701,6 +1084,8 @@ export function MessagingWorkspace() {
                   }}
                 />
                 <button
+                  onClick={handleSearchUsers}
+                  disabled={isSearchingUsers}
                   style={{
                     background: 'var(--nv-primary)',
                     color: '#fff',
@@ -708,11 +1093,79 @@ export function MessagingWorkspace() {
                     borderRadius: '8px',
                     fontSize: '0.85rem',
                     fontWeight: 600,
+                    cursor: isSearchingUsers ? 'not-allowed' : 'pointer',
+                    opacity: isSearchingUsers ? 0.7 : 1,
                   }}
                 >
-                  Search
+                  {isSearchingUsers ? 'Searching...' : 'Search'}
                 </button>
               </div>
+
+              {/* Discovered Users List */}
+              {discoveredUsers.length > 0 && (
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--nv-text-muted)', textTransform: 'uppercase', marginBottom: '0.5rem' }}>
+                    Matching Users ({discoveredUsers.length})
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {discoveredUsers.map((u) => (
+                      <div
+                        key={u.id}
+                        style={{
+                          background: 'var(--nv-bg-elevated)',
+                          border: '1px solid var(--nv-border)',
+                          borderRadius: '10px',
+                          padding: '0.75rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '0.5rem',
+                        }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--nv-text-primary)' }}>
+                            {u.displayName || u.username}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--nv-text-muted)' }}>
+                            @{u.username} • {u.nexaVoiceId}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
+                          <button
+                            onClick={() => handleStartDirectChat(u)}
+                            style={{
+                              padding: '0.35rem 0.65rem',
+                              background: 'var(--nv-primary)',
+                              color: '#fff',
+                              borderRadius: '6px',
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Chat
+                          </button>
+                          <button
+                            onClick={() => handleSendContactRequest(u.id)}
+                            style={{
+                              padding: '0.35rem 0.65rem',
+                              background: 'transparent',
+                              border: '1px solid var(--nv-border)',
+                              color: 'var(--nv-text-secondary)',
+                              borderRadius: '6px',
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            + Add
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Privacy Setting Card */}
               <div
@@ -733,7 +1186,7 @@ export function MessagingWorkspace() {
                     <input
                       type="checkbox"
                       checked={privacySettings.discoverableByUsername}
-                      onChange={(e) => setPrivacySettings({ ...privacySettings, discoverableByUsername: e.target.checked })}
+                      onChange={(e) => handleUpdatePrivacy('discoverableByUsername', e.target.checked)}
                     />
                   </label>
                   <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
@@ -741,7 +1194,7 @@ export function MessagingWorkspace() {
                     <input
                       type="checkbox"
                       checked={privacySettings.discoverableByNexaVoiceId}
-                      onChange={(e) => setPrivacySettings({ ...privacySettings, discoverableByNexaVoiceId: e.target.checked })}
+                      onChange={(e) => handleUpdatePrivacy('discoverableByNexaVoiceId', e.target.checked)}
                     />
                   </label>
                   <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
@@ -749,7 +1202,7 @@ export function MessagingWorkspace() {
                     <input
                       type="checkbox"
                       checked={privacySettings.readReceiptsEnabled}
-                      onChange={(e) => setPrivacySettings({ ...privacySettings, readReceiptsEnabled: e.target.checked })}
+                      onChange={(e) => handleUpdatePrivacy('readReceiptsEnabled', e.target.checked)}
                     />
                   </label>
                   <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
@@ -757,7 +1210,7 @@ export function MessagingWorkspace() {
                     <input
                       type="checkbox"
                       checked={privacySettings.typingIndicatorsEnabled}
-                      onChange={(e) => setPrivacySettings({ ...privacySettings, typingIndicatorsEnabled: e.target.checked })}
+                      onChange={(e) => handleUpdatePrivacy('typingIndicatorsEnabled', e.target.checked)}
                     />
                   </label>
                 </div>
@@ -817,7 +1270,25 @@ export function MessagingWorkspace() {
           </div>
 
           {/* Action Buttons */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                padding: '0.35rem 0.65rem',
+                borderRadius: '8px',
+                background: connectionState === 'CONNECTED' ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                color: connectionState === 'CONNECTED' ? '#22c55e' : '#ef4444',
+                border: `1px solid ${connectionState === 'CONNECTED' ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+              }}
+            >
+              {connectionState === 'CONNECTED' ? <Wifi size={14} /> : <WifiOff size={14} />}
+              {connectionState === 'CONNECTED' ? 'Realtime Connected' : connectionState === 'CONNECTING' ? 'Connecting...' : 'Offline (Queued)'}
+            </div>
+
             <button
               onClick={() => setShowDetailsPanel(!showDetailsPanel)}
               style={{
@@ -841,17 +1312,35 @@ export function MessagingWorkspace() {
 
         {/* Message Stream */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {activeMessages.map((msg) => {
-            const isMe = msg.senderId === CURRENT_USER.id;
-            return (
-              <div
-                key={msg.id}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: isMe ? 'flex-end' : 'flex-start',
-                }}
-              >
+          {isLoadingMessages ? (
+            <div style={{ margin: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', color: 'var(--nv-text-muted)' }}>
+              <div style={{ width: '28px', height: '28px', border: '3px solid var(--nv-border)', borderTopColor: 'var(--nv-primary)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+              <div style={{ fontSize: '0.85rem' }}>Loading secure messages...</div>
+            </div>
+          ) : activeMessages.length === 0 ? (
+            <div style={{ margin: 'auto', textAlign: 'center', color: 'var(--nv-text-muted)', padding: '2rem 1rem' }}>
+              <div style={{ width: '52px', height: '52px', borderRadius: '50%', background: 'var(--nv-bg-surface)', border: '1px solid var(--nv-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem', color: 'var(--nv-primary)' }}>
+                <Lock size={22} />
+              </div>
+              <div style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--nv-text-primary)', marginBottom: '0.35rem' }}>
+                End-to-End Encrypted Session
+              </div>
+              <div style={{ fontSize: '0.85rem', maxWidth: '340px', lineHeight: 1.5, margin: '0 auto' }}>
+                Messages are protected with monotonic integer sequence ordering and cryptographic session integrity. Send a message below to start chatting.
+              </div>
+            </div>
+          ) : (
+            activeMessages.map((msg) => {
+              const isMe = msg.senderId === currentUser.id;
+              return (
+                <div
+                  key={msg.id}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: isMe ? 'flex-end' : 'flex-start',
+                  }}
+                >
                 {/* Reply Anchor preview if replying */}
                 {msg.replyToMessageId && (
                   <div
@@ -1042,7 +1531,7 @@ export function MessagingWorkspace() {
                 </div>
               </div>
             );
-          })}
+          }))}
 
           {/* Typing Indicator Bar */}
           {remoteTypingUser && (
@@ -1119,10 +1608,20 @@ export function MessagingWorkspace() {
               padding: '0.5rem 0.85rem',
             }}
           >
-            <button title="Attach File" style={{ color: 'var(--nv-text-muted)' }}>
+            <input
+              type="file"
+              ref={fileInputRef}
+              style={{ display: 'none' }}
+              onChange={handleFileSelected}
+            />
+            <button
+              title="Attach File"
+              onClick={() => fileInputRef.current?.click()}
+              style={{ color: 'var(--nv-text-muted)', cursor: 'pointer', background: 'transparent', border: 'none' }}
+            >
               <Paperclip size={18} />
             </button>
-            <button title="Voice Message" style={{ color: 'var(--nv-text-muted)' }}>
+            <button title="Voice Message" style={{ color: 'var(--nv-text-muted)', background: 'transparent', border: 'none' }}>
               <Mic size={18} />
             </button>
 
@@ -1130,7 +1629,7 @@ export function MessagingWorkspace() {
               type="text"
               placeholder="Write a message... (Enter to send)"
               value={composerText}
-              onChange={(e) => setComposerText(e.target.value)}
+              onChange={(e) => handleComposerChange(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();

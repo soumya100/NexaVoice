@@ -88,38 +88,186 @@ enum ReportStatus {
 enum CallType {
   VOICE
   VIDEO
+  GROUP_VOICE
+  GROUP_VIDEO
   CONFERENCE
+  PERSISTENT_ROOM
   PSTN
 }
 
 enum CallSessionStatus {
+  NEW
   INITIATING
   RINGING
   CONNECTING
   ACTIVE
+  HELD
   ON_HOLD
+  INTERRUPTED
+  ENDING
   ENDED
   FAILED
   MISSED
   REJECTED
 }
 
+enum CallLegStatus {
+  CREATED
+  INVITED
+  RINGING
+  CONNECTING
+  CONNECTED
+  HELD
+  TRANSFERRED
+  ENDED
+  FAILED
+}
+
+enum CallDirection {
+  INBOUND
+  OUTBOUND
+}
+
 enum ParticipantRole {
   HOST
   CO_HOST
   PARTICIPANT
+  SPEAKER
+  LISTENER
   AI_ASSISTANT
 }
 
 enum ParticipantState {
   INVITED
   RINGING
+  JOINING
   JOINED
+  CONNECTED
   MUTED
   ON_HOLD
   LEFT
   DISCONNECTED
+  REMOVED
+  DECLINED
+  MISSED
 }
+
+enum MediaSessionStatus {
+  INITIALIZING
+  OFFERED
+  ANSWERED
+  CONNECTING
+  CONNECTED
+  RENEGOTIATING
+  FAILED
+  CLOSED
+}
+
+enum MediaMode {
+  P2P_DIRECT
+  SFU_ROUTED
+}
+
+enum InvitationStatus {
+  PENDING
+  RINGING
+  ACCEPTED
+  DECLINED
+  CANCELED
+  EXPIRED
+  MISSED
+}
+
+enum RoomType {
+  PRIVATE
+  INVITE_ONLY
+  LINK_ACCESS
+  PUBLIC
+}
+
+enum TransferStatus {
+  INITIATED
+  CONSULTING
+  ACCEPTED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum WaitingRoomState {
+  NONE
+  JOIN_REQUESTED
+  WAITING
+  ADMITTED
+  DENIED
+}
+
+enum ConferenceRole {
+  HOST
+  MODERATOR
+  PARTICIPANT
+  VIEWER
+}
+
+enum RoomMemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+  GUEST
+}
+
+enum ScheduledCallStatus {
+  SCHEDULED
+  STARTING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  MISSED
+}
+
+enum DeviceTransferStatus {
+  REQUESTED
+  AUTHENTICATING
+  CONNECTING
+  CONNECTED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum RecordingStatus {
+  REQUESTED
+  CONSENT_PENDING
+  STARTING
+  RECORDING
+  PAUSED
+  STOPPING
+  COMPLETED
+  FAILED
+  DELETED
+}
+
+enum RecordingType {
+  AUDIO
+  VIDEO
+  SCREEN
+  COMBINED
+}
+
+enum ConsentState {
+  PENDING
+  GRANTED
+  DENIED
+  WITHDRAWN
+}
+
+enum TranscriptStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 
 enum AIActionApprovalStatus {
   PENDING
@@ -160,6 +308,19 @@ model User {
   sentMessages         Message[]                 @relation("UserSentMessages")
   conversations        ConversationParticipant[]
   callParticipants     CallParticipant[]
+  hostedCalls          CallSession[]             @relation("HostUserCalls")
+  callLegs             CallLeg[]
+  sentCallInvitations  CallInvitation[]          @relation("SentCallInvitations")
+  receivedCallInvitations CallInvitation[]       @relation("ReceivedCallInvitations")
+  createdCallRooms     CallRoom[]                @relation("CreatedCallRooms")
+  conferenceParticipants   ConferenceParticipant[]
+  roomMemberships          RoomMember[]
+  organizedScheduledCalls  ScheduledCall[]           @relation("OrganizedScheduledCalls")
+  scheduledCallInvitations ScheduledCallInvitee[]    @relation("ReceivedScheduledCalls")
+  deviceTransfers          CallDeviceTransfer[]
+  initiatedRecordings      RecordingSession[]        @relation("InitiatedRecordings")
+  recordingConsents        RecordingConsent[]        @relation("UserRecordingConsents")
+  receivedVoicemails       VoicemailMessage[]        @relation("ReceivedVoicemails")
   aiProfile            AIProfile?
   aiActions            AIAction[]
   consentRecords       ConsentRecord[]
@@ -461,57 +622,443 @@ model RefreshToken {
 }
 
 model Device {
-  id           String   @id @default(uuid())
+  id           String    @id @default(uuid())
   userId       String
-  deviceId     String   @unique
-  deviceType   String   // WEB, IOS, ANDROID, DESKTOP
+  deviceId     String    @unique
+  deviceType   String    // WEB, IOS, ANDROID, DESKTOP
   deviceName   String
   platform     String?
   appVersion   String?
-  isTrusted    Boolean  @default(false)
+  isTrusted    Boolean   @default(false)
   pushToken    String?
-  lastActiveAt DateTime @default(now())
-  createdAt    DateTime @default(now())
+  lastActiveAt DateTime  @default(now())
+  createdAt    DateTime  @default(now())
 
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   sessions Session[]
+  callLegs CallLeg[]
 
   @@index([userId])
 }
 
 model CallSession {
-  id             String            @id @default(uuid())
-  conversationId String?
-  callType       CallType          @default(VOICE)
-  status         CallSessionStatus @default(INITIATING)
-  hostUserId     String
-  startedAt      DateTime          @default(now())
-  endedAt        DateTime?
+  id                 String            @id @default(uuid())
+  conversationId     String?
+  callType           CallType          @default(VOICE)
+  status             CallSessionStatus @default(NEW)
+  hostUserId         String
+  roomName           String?
+  roomId             String?
+  parentCallSessionId String?
+  screenSharerUserId String?
+  isPersistent       Boolean           @default(false)
+  maxParticipants    Int               @default(100)
+  scheduledStartTime DateTime?
+  timezone           String?
+  startedAt          DateTime          @default(now())
+  activeAt           DateTime?
+  endedAt            DateTime?
+  endReason          String?
+  metadataJson       String            @default("{}")
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
 
-  conversation Conversation?     @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  participants CallParticipant[]
+  conversation       Conversation?     @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  hostUser           User              @relation("HostUserCalls", fields: [hostUserId], references: [id], onDelete: Cascade)
+  room               CallRoom?         @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  parentCallSession  CallSession?      @relation("CallSessionLineage", fields: [parentCallSessionId], references: [id], onDelete: SetNull)
+  childCallSessions  CallSession[]     @relation("CallSessionLineage")
+  participants       CallParticipant[]
+  legs               CallLeg[]
+  mediaSessions      MediaSession[]
+  invitations        CallInvitation[]
+  events             CallEvent[]
+  transfers          CallTransfer[]
+  conferenceSession  ConferenceSession?
+  recordings         RecordingSession[]
+  transcripts        CallTranscript[]
+  deviceTransfers    CallDeviceTransfer[]
+  scheduledCalls     ScheduledCall[]
+  voicemails         VoicemailMessage[]
+  telephonyUsage     TelephonyUsage[]
+  aiSessions         AISession[]
+  callSummary        CallSummary?
+  actionItems        ActionItem[]
+  aiUsage            AIUsage[]
 
   @@index([status])
   @@index([hostUserId])
+  @@index([conversationId])
+  @@index([roomId])
+  @@index([parentCallSessionId])
 }
 
 model CallParticipant {
-  id            String           @id @default(uuid())
-  callSessionId String
-  userId        String
-  role          ParticipantRole  @default(PARTICIPANT)
-  state         ParticipantState @default(INVITED)
-  isAudioMuted  Boolean          @default(false)
-  isVideoMuted  Boolean          @default(false)
-  joinedAt      DateTime         @default(now())
-  leftAt        DateTime?
+  id                     String           @id @default(uuid())
+  callSessionId          String
+  userId                 String
+  role                   ParticipantRole  @default(PARTICIPANT)
+  state                  ParticipantState @default(INVITED)
+  waitingState           WaitingRoomState @default(NONE)
+  admittedAt             DateTime?
+  admittedByUserId       String?
+  isAudioMuted           Boolean          @default(false)
+  isVideoMuted           Boolean          @default(false)
+  isScreenSharing        Boolean          @default(false)
+  isOnHold               Boolean          @default(false)
+  canMuteOthers          Boolean          @default(false)
+  canRemoveParticipants  Boolean          @default(false)
+  canInviteParticipants  Boolean          @default(true)
+  canShareScreen         Boolean          @default(true)
+  canRecord              Boolean          @default(false)
+  canEndCall             Boolean          @default(false)
+  aiAgentId              String?
+  metadataJson           String           @default("{}")
+  joinedAt               DateTime         @default(now())
+  leftAt                 DateTime?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
 
-  callSession CallSession @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  callSession            CallSession      @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+  user                   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  legs                   CallLeg[]
 
   @@unique([callSessionId, userId])
   @@index([callSessionId])
   @@index([userId])
+  @@index([state])
+  @@index([waitingState])
+}
+
+model CallLeg {
+  id            String        @id @default(uuid())
+  callSessionId String
+  participantId String?
+  userId        String
+  deviceId      String?
+  direction     CallDirection @default(OUTBOUND)
+  status        CallLegStatus @default(CREATED)
+  startedAt     DateTime      @default(now())
+  connectedAt   DateTime?
+  endedAt       DateTime?
+  endReason     String?
+  metadataJson  String        @default("{}")
+
+  callSession   CallSession      @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+  participant   CallParticipant? @relation(fields: [participantId], references: [id], onDelete: SetNull)
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device        Device?          @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([callSessionId])
+  @@index([userId])
+  @@index([status])
+}
+
+model MediaSession {
+  id                 String             @id @default(uuid())
+  callSessionId      String
+  provider           String             @default("mock") // mock, webrtc-p2p, sfu-livekit
+  mode               MediaMode          @default(P2P_DIRECT)
+  status             MediaSessionStatus @default(INITIALIZING)
+  sfuRoomId          String?
+  iceServersJson     String             @default("[]")
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  closedAt           DateTime?
+
+  callSession        CallSession        @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+
+  @@index([callSessionId])
+  @@index([status])
+}
+
+model CallInvitation {
+  id            String           @id @default(uuid())
+  callSessionId String
+  inviterId     String
+  inviteeId     String
+  status        InvitationStatus @default(PENDING)
+  invitedAt     DateTime         @default(now())
+  respondedAt   DateTime?
+  expiresAt     DateTime
+
+  callSession   CallSession      @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+  inviter       User             @relation("SentCallInvitations", fields: [inviterId], references: [id], onDelete: Cascade)
+  invitee       User             @relation("ReceivedCallInvitations", fields: [inviteeId], references: [id], onDelete: Cascade)
+
+  @@index([callSessionId])
+  @@index([inviteeId, status])
+  @@index([inviterId])
+}
+
+model CallRoom {
+  id                  String        @id @default(uuid())
+  name                String
+  slug                String        @unique
+  description         String?
+  creatorId           String
+  roomType            RoomType      @default(PRIVATE)
+  isPersistent        Boolean       @default(true)
+  maxParticipants     Int           @default(100)
+  isLocked            Boolean       @default(false)
+  waitingRoomEnabled  Boolean       @default(false)
+  allowRecording      Boolean       @default(true)
+  recordingsRetentionDays Int       @default(30)
+  accessTokenHash     String?
+  tokenExpiresAt      DateTime?
+  activeCallSessionId String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  creator             User          @relation("CreatedCallRooms", fields: [creatorId], references: [id], onDelete: Cascade)
+  callSessions        CallSession[]
+  members             RoomMember[]
+  scheduledCalls      ScheduledCall[]
+
+  @@index([creatorId])
+  @@index([slug])
+}
+
+model CallTransfer {
+  id              String         @id @default(uuid())
+  callSessionId   String
+  initiatorUserId String
+  targetUserId    String
+  transferType    String         @default("BLIND") // BLIND, ATTENDED
+  status          TransferStatus @default(INITIATED)
+  initiatedAt     DateTime       @default(now())
+  completedAt     DateTime?
+
+  callSession     CallSession    @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+
+  @@index([callSessionId])
+}
+
+model CallEvent {
+  id            String      @id @default(uuid())
+  callSessionId String
+  actorId       String?
+  eventType     String
+  payloadJson   String      @default("{}")
+  createdAt     DateTime    @default(now())
+
+  callSession   CallSession @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+
+  @@index([callSessionId])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+model ConferenceSession {
+  id                     String                  @id @default(uuid())
+  callSessionId          String                  @unique
+  title                  String
+  isLocked               Boolean                 @default(false)
+  allowScreenShare       Boolean                 @default(true)
+  allowParticipantUnmute Boolean                 @default(true)
+  waitingRoomEnabled     Boolean                 @default(false)
+  maxParticipants        Int                     @default(100)
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+
+  callSession            CallSession             @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+  participants           ConferenceParticipant[]
+  events                 ConferenceEvent[]
+}
+
+model ConferenceParticipant {
+  id                  String            @id @default(uuid())
+  conferenceSessionId String
+  userId              String
+  role                ConferenceRole    @default(PARTICIPANT)
+  waitingState        WaitingRoomState  @default(NONE)
+  joinedAt            DateTime          @default(now())
+  leftAt              DateTime?
+
+  conferenceSession   ConferenceSession @relation(fields: [conferenceSessionId], references: [id], onDelete: Cascade)
+  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conferenceSessionId, userId])
+  @@index([conferenceSessionId])
+  @@index([userId])
+}
+
+model ConferenceEvent {
+  id                  String            @id @default(uuid())
+  conferenceSessionId String
+  actorId             String?
+  eventType           String
+  metadataJson        String            @default("{}")
+  createdAt           DateTime          @default(now())
+
+  conferenceSession   ConferenceSession @relation(fields: [conferenceSessionId], references: [id], onDelete: Cascade)
+
+  @@index([conferenceSessionId])
+  @@index([eventType])
+}
+
+model RoomMember {
+  id        String         @id @default(uuid())
+  roomId    String
+  userId    String
+  role      RoomMemberRole @default(MEMBER)
+  isBanned  Boolean        @default(false)
+  joinedAt  DateTime       @default(now())
+
+  room      CallRoom       @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@index([roomId])
+  @@index([userId])
+}
+
+model ScheduledCall {
+  id                 String              @id @default(uuid())
+  organizerId        String
+  roomId             String?
+  callSessionId      String?
+  title              String
+  description        String?
+  scheduledStartTime DateTime
+  scheduledEndTime   DateTime?
+  timezone           String              @default("UTC")
+  status             ScheduledCallStatus @default(SCHEDULED)
+  reminderMinutes    Int                 @default(15)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  organizer          User                    @relation("OrganizedScheduledCalls", fields: [organizerId], references: [id], onDelete: Cascade)
+  room               CallRoom?               @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  callSession        CallSession?            @relation(fields: [callSessionId], references: [id], onDelete: SetNull)
+  invitees           ScheduledCallInvitee[]
+
+  @@index([organizerId])
+  @@index([scheduledStartTime])
+  @@index([status])
+}
+
+model ScheduledCallInvitee {
+  id              String           @id @default(uuid())
+  scheduledCallId String
+  userId          String
+  status          InvitationStatus @default(PENDING)
+  createdAt       DateTime         @default(now())
+
+  scheduledCall   ScheduledCall    @relation(fields: [scheduledCallId], references: [id], onDelete: Cascade)
+  user            User             @relation("ReceivedScheduledCalls", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([scheduledCallId, userId])
+  @@index([scheduledCallId])
+  @@index([userId])
+}
+
+model CallDeviceTransfer {
+  id              String               @id @default(uuid())
+  callSessionId   String
+  userId          String
+  sourceDeviceId  String
+  targetDeviceId  String
+  status          DeviceTransferStatus @default(REQUESTED)
+  failureReason   String?
+  initiatedAt     DateTime             @default(now())
+  completedAt     DateTime?
+
+  callSession     CallSession          @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([callSessionId])
+  @@index([userId])
+}
+
+model RecordingSession {
+  id              String           @id @default(uuid())
+  callSessionId   String
+  initiatorUserId String
+  status          RecordingStatus  @default(REQUESTED)
+  recordingType   RecordingType    @default(COMBINED)
+  storagePath     String?
+  storageBucket   String?
+  durationSeconds Int              @default(0)
+  fileSizeBytes   BigInt?
+  mimeType        String?
+  retentionDays   Int              @default(30)
+  expiresAt       DateTime?
+  isLegalHold     Boolean          @default(false)
+  startedAt       DateTime?
+  pausedAt        DateTime?
+  stoppedAt       DateTime?
+  deletedAt       DateTime?
+  failureReason   String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  callSession     CallSession        @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+  initiator       User               @relation("InitiatedRecordings", fields: [initiatorUserId], references: [id], onDelete: Cascade)
+  consents        RecordingConsent[]
+  transcript      CallTranscript?
+  voicemailMessage VoicemailMessage?
+
+  @@index([callSessionId])
+  @@index([initiatorUserId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model RecordingConsent {
+  id                 String           @id @default(uuid())
+  recordingSessionId String
+  participantUserId  String
+  policyVersion      String           @default("1.0")
+  consentState       ConsentState     @default(PENDING)
+  consentedAt        DateTime?
+  withdrawnAt        DateTime?
+  userAgent          String?
+  ipAddress          String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  recordingSession   RecordingSession @relation(fields: [recordingSessionId], references: [id], onDelete: Cascade)
+  participant        User             @relation("UserRecordingConsents", fields: [participantUserId], references: [id], onDelete: Cascade)
+
+  @@unique([recordingSessionId, participantUserId])
+  @@index([recordingSessionId])
+  @@index([participantUserId])
+}
+
+model CallTranscript {
+  id                 String             @id @default(uuid())
+  callSessionId      String
+  recordingSessionId String?            @unique
+  provider           String             @default("internal")
+  language           String             @default("en-US")
+  status             TranscriptStatus   @default(QUEUED)
+  fullText           String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  callSession        CallSession        @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+  recordingSession   RecordingSession?  @relation(fields: [recordingSessionId], references: [id], onDelete: SetNull)
+  segments           TranscriptSegment[]
+
+  @@index([callSessionId])
+  @@index([recordingSessionId])
+}
+
+model TranscriptSegment {
+  id             String         @id @default(uuid())
+  transcriptId   String
+  speakerUserId  String?
+  speakerLabel   String
+  startMs        Int
+  endMs          Int
+  text           String
+  confidence     Float          @default(1.0)
+  createdAt      DateTime       @default(now())
+
+  transcript     CallTranscript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
+
+  @@index([transcriptId, startMs])
 }
 
 model AIProfile {
@@ -639,4 +1186,366 @@ model OutboxEvent {
   @@index([aggregateType, aggregateId])
   @@index([createdAt])
 }
+
+// ==========================================
+// MILESTONE 6: TELEPHONY, PSTN & SIP DOMAIN
+// ==========================================
+
+enum PhoneNumberType {
+  LOCAL
+  MOBILE
+  TOLL_FREE
+  GEOGRAPHIC
+  NON_GEOGRAPHIC
+}
+
+enum PhoneNumberStatus {
+  SEARCHING
+  RESERVED
+  PROVISIONING
+  ACTIVE
+  ASSIGNED
+  SUSPENDED
+  RELEASING
+  RELEASED
+  FAILED
+}
+
+enum PhoneNumberAssignmentType {
+  USER
+  ROOM
+  ORGANIZATION
+  ROUTING_RULE
+}
+
+enum RoutingTargetType {
+  USER
+  ROOM
+  VOICEMAIL
+  QUEUE
+  EXTERNAL_NUMBER
+  REJECT
+}
+
+enum SipTrunkAuthMode {
+  IP_ACCESS_LIST
+  CREDENTIAL
+}
+
+enum SipTransport {
+  UDP
+  TCP
+  TLS
+}
+
+enum SipTrunkStatus {
+  INACTIVE
+  PROVISIONING
+  ACTIVE
+  FAILED
+  SUSPENDED
+}
+
+enum VoicemailStatus {
+  UNREAD
+  READ
+  ARCHIVED
+  DELETED
+}
+
+model PhoneNumber {
+  id                 String                    @id @default(uuid())
+  e164Number         String                    @unique
+  displayNumber      String
+  countryCode        String
+  type               PhoneNumberType           @default(LOCAL)
+  status             PhoneNumberStatus         @default(ACTIVE)
+  provider           String                    @default("mock") // mock, twilio, telnyx
+  providerResourceId String?
+  assignedType       PhoneNumberAssignmentType?
+  assignedId         String?
+  capabilitiesJson   String                    @default("[\"outboundCalling\",\"inboundCalling\",\"dtmf\",\"recording\"]")
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  releasedAt         DateTime?
+
+  routingRules       RoutingRule[]
+  usageRecords       TelephonyUsage[]
+
+  @@index([e164Number])
+  @@index([status])
+  @@index([assignedId])
+  @@index([provider])
+}
+
+model RoutingRule {
+  id                   String            @id @default(uuid())
+  phoneNumberId        String
+  name                 String
+  priority             Int               @default(1)
+  targetType           RoutingTargetType @default(USER)
+  targetId             String?
+  fallbackTargetType   RoutingTargetType? @default(VOICEMAIL)
+  fallbackTargetId     String?
+  ringDurationSeconds  Int               @default(20)
+  businessHoursOnly    Boolean           @default(false)
+  enabled              Boolean           @default(true)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  phoneNumber          PhoneNumber       @relation(fields: [phoneNumberId], references: [id], onDelete: Cascade)
+
+  @@index([phoneNumberId])
+  @@index([priority])
+  @@index([enabled])
+}
+
+model SipTrunk {
+  id                   String           @id @default(uuid())
+  name                 String
+  provider             String           @default("mock")
+  domain               String
+  authMode             SipTrunkAuthMode @default(CREDENTIAL)
+  transport            SipTransport     @default(TLS)
+  region               String           @default("us-east-1")
+  status               SipTrunkStatus   @default(ACTIVE)
+  maxConcurrentCalls   Int              @default(10)
+  encryptedCredentials String?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  @@index([status])
+  @@index([domain])
+}
+
+model VoicemailMessage {
+  id                 String           @id @default(uuid())
+  callSessionId      String
+  recordingSessionId String?          @unique
+  callerNumber       String
+  callerName         String?
+  recipientUserId    String
+  durationSeconds    Int              @default(0)
+  status             VoicemailStatus  @default(UNREAD)
+  transcript         String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  callSession        CallSession       @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+  recordingSession   RecordingSession? @relation(fields: [recordingSessionId], references: [id], onDelete: SetNull)
+  recipient          User              @relation("ReceivedVoicemails", fields: [recipientUserId], references: [id], onDelete: Cascade)
+
+  @@index([recipientUserId, status])
+  @@index([callSessionId])
+  @@index([createdAt])
+}
+
+model TelephonyUsage {
+  id                String        @id @default(uuid())
+  callSessionId     String
+  phoneNumberId     String?
+  provider          String
+  providerCallId    String?
+  sourceNumber      String
+  destinationNumber String
+  direction         CallDirection @default(OUTBOUND)
+  durationSeconds   Int           @default(0)
+  callStatus        String
+  region            String?
+  startedAt         DateTime      @default(now())
+  endedAt           DateTime?
+
+  callSession       CallSession   @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+  phoneNumber       PhoneNumber?  @relation(fields: [phoneNumberId], references: [id], onDelete: SetNull)
+
+  @@index([callSessionId])
+  @@index([phoneNumberId])
+  @@index([providerCallId])
+  @@index([sourceNumber])
+  @@index([destinationNumber])
+  @@index([startedAt])
+}
+
+model ProviderEvent {
+  id              String   @id @default(uuid())
+  provider        String
+  providerEventId String
+  eventType       String
+  aggregateId     String?
+  status          String   @default("PROCESSED") // PENDING, PROCESSED, FAILED, DUPLICATE
+  payloadJson     String
+  processedAt     DateTime @default(now())
+
+  @@unique([provider, providerEventId])
+  @@index([eventType])
+  @@index([processedAt])
+}
+
+enum AgentStatus {
+  DRAFT
+  ACTIVE
+  DISABLED
+  ARCHIVED
+}
+
+enum AISessionStatus {
+  INITIALIZING
+  LISTENING
+  THINKING
+  SPEAKING
+  TOOL_CALLING
+  HANDOFF
+  COMPLETED
+  FAILED
+}
+
+enum AITurnSpeaker {
+  USER
+  AGENT
+  SYSTEM
+  TOOL
+}
+
+model AIAgent {
+  id              String           @id @default(uuid())
+  organizationId  String           @default("org_default")
+  name            String
+  description     String?
+  status          AgentStatus      @default(DRAFT)
+  activeVersionId String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  versions        AIAgentVersion[]
+  sessions        AISession[]
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+model AIAgentVersion {
+  id               String      @id @default(uuid())
+  agentId          String
+  version          Int
+  systemPrompt     String
+  voiceId          String      @default("alloy")
+  voiceProvider    String      @default("openai")
+  model            String      @default("gpt-4o")
+  temperature      Float       @default(0.7)
+  toolsJson        String      @default("[]")
+  safetyPolicyJson String      @default("{}")
+  createdAt        DateTime    @default(now())
+
+  agent            AIAgent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  sessions         AISession[]
+
+  @@unique([agentId, version])
+  @@index([agentId])
+}
+
+model AISession {
+  id              String          @id @default(uuid())
+  callSessionId   String
+  agentId         String
+  agentVersionId  String
+  status          AISessionStatus @default(INITIALIZING)
+  isInterrupted   Boolean         @default(false)
+  turnCount       Int             @default(0)
+  startedAt       DateTime        @default(now())
+  endedAt         DateTime?
+  handoffReason   String?
+  handoffToUserId String?
+
+  callSession     CallSession     @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+  agent           AIAgent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agentVersion    AIAgentVersion  @relation(fields: [agentVersionId], references: [id], onDelete: Cascade)
+  turns           AITurn[]
+  usage           AIUsage[]
+
+  @@index([callSessionId])
+  @@index([agentId])
+  @@index([status])
+}
+
+model AITurn {
+  id             String        @id @default(uuid())
+  sessionId      String
+  turnNumber     Int
+  speaker        AITurnSpeaker
+  text           String
+  audioUrl       String?
+  isInterrupted  Boolean       @default(false)
+  latencyMs      Int?
+  toolCallsJson  String?
+  createdAt      DateTime      @default(now())
+
+  session        AISession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, turnNumber])
+}
+
+model AITool {
+  id                   String   @id @default(uuid())
+  name                 String   @unique
+  description          String
+  parametersSchema     String   @default("{}")
+  isPrivileged         Boolean  @default(false)
+  requiresConfirmation Boolean  @default(false)
+  createdAt            DateTime @default(now())
+
+  @@index([name])
+}
+
+model CallSummary {
+  id            String      @id @default(uuid())
+  callSessionId String      @unique
+  overview      String
+  keyPointsJson String      @default("[]")
+  sentiment     String?
+  confidence    Float       @default(1.0)
+  createdAt     DateTime    @default(now())
+
+  callSession   CallSession @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+
+  @@index([callSessionId])
+}
+
+model ActionItem {
+  id              String      @id @default(uuid())
+  callSessionId   String
+  title           String
+  description     String?
+  assignee        String?
+  dueDate         String?
+  confidence      Float       @default(1.0)
+  isCompleted     Boolean     @default(false)
+  sourceSegmentId String?
+  createdAt       DateTime    @default(now())
+
+  callSession     CallSession @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+
+  @@index([callSessionId])
+}
+
+model AIUsage {
+  id            String       @id @default(uuid())
+  aiSessionId   String?
+  callSessionId String
+  provider      String
+  model         String
+  inputTokens   Int          @default(0)
+  outputTokens  Int          @default(0)
+  audioSeconds  Float        @default(0.0)
+  sttSeconds    Float        @default(0.0)
+  ttsSeconds    Float        @default(0.0)
+  createdAt     DateTime     @default(now())
+
+  callSession   CallSession  @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+  aiSession     AISession?   @relation(fields: [aiSessionId], references: [id], onDelete: SetNull)
+
+  @@index([callSessionId])
+  @@index([aiSessionId])
+  @@index([provider])
+}
+
 

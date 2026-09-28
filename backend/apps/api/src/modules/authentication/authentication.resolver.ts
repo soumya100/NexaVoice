@@ -8,7 +8,10 @@ import {
   AuthPayloadGql,
   DeviceDtoGql,
   LoginInput,
+  PasswordResetResponseGql,
   RegisterInput,
+  RequestPasswordResetInput,
+  ResetPasswordInput,
   SecurityEventDtoGql,
   SessionDtoGql,
   UserProfileGql,
@@ -57,6 +60,28 @@ export class AuthenticationResolver {
     const ipAddress = ctx.req?.ip;
     const userAgent = ctx.req?.headers?.['user-agent'];
     return this.authService.refreshToken(refreshToken, { ipAddress, userAgent });
+  }
+
+  @Public()
+  @Mutation(() => PasswordResetResponseGql, { description: 'Request password reset instructions sent via email' })
+  async requestPasswordReset(
+    @Args('input') input: RequestPasswordResetInput,
+    @Context() ctx: { req: { ip?: string; headers?: Record<string, string> } },
+  ): Promise<PasswordResetResponseGql> {
+    const ipAddress = ctx.req?.ip;
+    const userAgent = ctx.req?.headers?.['user-agent'];
+    return this.authService.requestPasswordReset(input, { ipAddress, userAgent });
+  }
+
+  @Public()
+  @Mutation(() => PasswordResetResponseGql, { description: 'Reset account password using secure reset token' })
+  async resetPassword(
+    @Args('input') input: ResetPasswordInput,
+    @Context() ctx: { req: { ip?: string; headers?: Record<string, string> } },
+  ): Promise<PasswordResetResponseGql> {
+    const ipAddress = ctx.req?.ip;
+    const userAgent = ctx.req?.headers?.['user-agent'];
+    return this.authService.resetPassword(input, { ipAddress, userAgent });
   }
 
   @Mutation(() => Boolean, { description: 'Logout current session or all active sessions' })

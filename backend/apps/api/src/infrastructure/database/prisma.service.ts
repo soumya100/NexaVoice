@@ -1,4 +1,5 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Optional, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '@prisma/client';
 import { StructuredLogger } from '../observability/structured-logger.service';
 
@@ -6,6 +7,13 @@ import { StructuredLogger } from '../observability/structured-logger.service';
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new StructuredLogger('PrismaService');
   private isConnected = false;
+
+  constructor(@Optional() configService?: ConfigService) {
+    const dbUrl =
+      configService?.get<string>('database.url') ||
+      process.env.DATABASE_URL;
+    super(dbUrl ? { datasources: { db: { url: dbUrl } } } : undefined);
+  }
 
   async onModuleInit() {
     try {
