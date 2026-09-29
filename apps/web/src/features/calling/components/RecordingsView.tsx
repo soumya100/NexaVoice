@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { callApi } from '../services/call-api';
 import { RecordingSession, CallTranscript } from '../types';
-import { Play, FileText, Trash2, Disc } from 'lucide-react';
+import { Play, FileText, Trash2, Disc, Search } from 'lucide-react';
 
 interface RecordingsViewProps {
   initialCallId?: string;
@@ -60,42 +60,48 @@ export const RecordingsView: React.FC<RecordingsViewProps> = ({ initialCallId })
   };
 
   return (
-    <div style={{ padding: '32px', width: '100%', overflowY: 'auto' }}>
-      <div style={{ marginBottom: '24px' }}>
-        <h2 style={{ fontSize: '20px', margin: '0 0 6px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Disc size={22} color="#ef4444" /> Call Recordings & AI Transcripts
+    <div style={{ padding: '32px 36px', width: '100%', overflowY: 'auto' }}>
+      <div style={{ marginBottom: '28px' }}>
+        <h2 style={{ fontSize: '24px', fontWeight: 800, letterSpacing: '-0.02em', margin: '0 0 6px 0', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <Disc size={26} color="#ef4444" /> Call Recordings & AI Transcripts
         </h2>
         <p style={{ margin: 0, color: '#94a3b8', fontSize: '14px' }}>
           Review encrypted call archives, stream playback securely with time-limited tokens, and inspect speaker-diarized transcripts.
         </p>
       </div>
 
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '24px', maxWidth: '500px' }}>
-        <input
-          type="text"
-          value={callIdInput}
-          onChange={(e) => setCallIdInput(e.target.value)}
-          placeholder="Enter Call ID to view recordings..."
-          style={{
-            flex: 1,
-            padding: '8px 12px',
-            borderRadius: '6px',
-            backgroundColor: '#1e293b',
-            border: '1px solid #334155',
-            color: '#f8fafc',
-          }}
-        />
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '28px', maxWidth: '560px' }}>
+        <div style={{ flex: 1 }} className="sassy-input-wrap">
+          <span className="sassy-input-icon">
+            <Search size={16} color="#818cf8" />
+          </span>
+          <input
+            type="text"
+            value={callIdInput}
+            onChange={(e) => setCallIdInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') fetchRecordings();
+            }}
+            placeholder="Enter Call Session ID to query encrypted recordings..."
+            className="sassy-input"
+          />
+        </div>
         <button
           type="button"
           onClick={fetchRecordings}
+          disabled={loading}
           style={{
-            padding: '8px 18px',
-            backgroundColor: '#3b82f6',
+            padding: '11px 22px',
+            background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
             color: '#fff',
             border: 'none',
-            borderRadius: '6px',
-            fontWeight: 500,
-            cursor: 'pointer',
+            borderRadius: '12px',
+            fontWeight: 700,
+            fontSize: '13px',
+            cursor: loading ? 'not-allowed' : 'pointer',
+            boxShadow: '0 4px 16px rgba(99, 102, 241, 0.35)',
+            transition: 'all 150ms ease',
+            whiteSpace: 'nowrap',
           }}
         >
           {loading ? 'Searching...' : 'Find Recordings'}

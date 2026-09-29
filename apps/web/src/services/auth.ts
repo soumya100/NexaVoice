@@ -98,16 +98,20 @@ class AuthService {
       this.status = 'AUTHENTICATED';
     }
 
-    // Retain minimal session hint for page refresh without storing private messages
-    sessionStorage.setItem('nv_user_hint', JSON.stringify({
+    // Retain session hint for page refresh and multi-tab sync without storing private messages
+    const userHint = JSON.stringify({
       id: user.id,
       username: user.username,
       displayName: user.displayName,
       nexaVoiceId: user.nexaVoiceId,
       roles: user.roles,
       accountState: user.accountState,
-    }));
+    });
+    sessionStorage.setItem('nv_user_hint', userHint);
     sessionStorage.setItem('nv_at_session', accessToken);
+    localStorage.setItem('nv_user_hint', userHint);
+    localStorage.setItem('nv_at_session', accessToken);
+    localStorage.setItem('nexavoice_access_token', accessToken);
 
     this.notify();
   }
@@ -128,6 +132,10 @@ class AuthService {
     sessionStorage.removeItem('nv_at_session');
     sessionStorage.removeItem('nv_rt_session');
     sessionStorage.removeItem('nv_user_hint');
+    localStorage.removeItem('nv_at_session');
+    localStorage.removeItem('nv_rt_session');
+    localStorage.removeItem('nv_user_hint');
+    localStorage.removeItem('nexavoice_access_token');
 
     // Purge cached query data immediately
     if (this.onPurgeCallback) {
@@ -149,6 +157,9 @@ class AuthService {
     sessionStorage.removeItem('nv_at_session');
     sessionStorage.removeItem('nv_rt_session');
     sessionStorage.removeItem('nv_user_hint');
+    localStorage.removeItem('nv_at_session');
+    localStorage.removeItem('nv_rt_session');
+    localStorage.removeItem('nv_user_hint');
     localStorage.removeItem('nexavoice_access_token');
 
     // Purge cached query data immediately
@@ -160,19 +171,23 @@ class AuthService {
   }
 
   /**
-   * Attempts to restore active session from in-memory session storage.
+   * Attempts to restore active session from in-memory session storage or persistent storage.
    */
   private restoreSession() {
     try {
-      const storedToken = sessionStorage.getItem('nv_at_session') || localStorage.getItem('nexavoice_access_token');
-      const storedUser = sessionStorage.getItem('nv_user_hint');
+      const storedToken =
+        sessionStorage.getItem('nv_at_session') ||
+        localStorage.getItem('nv_at_session') ||
+        localStorage.getItem('nexavoice_access_token');
+      const storedUser =
+        sessionStorage.getItem('nv_user_hint') ||
+        localStorage.getItem('nv_user_hint');
 
       if (storedToken && storedUser) {
         this.accessToken = storedToken;
         this.currentUser = JSON.parse(storedUser);
         this.status = 'AUTHENTICATED';
       } else {
-        // Fallback for initial demo environment if none set
         this.status = 'UNAUTHENTICATED';
       }
     } catch {

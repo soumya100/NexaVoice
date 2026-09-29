@@ -1,6 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useAdvancedCalling } from '../hooks/useAdvancedCalling';
-import { Calendar, Plus, X, Clock, RefreshCw, Trash2, ArrowUpRight, Sparkles } from 'lucide-react';
+import {
+  Calendar,
+  Plus,
+  X,
+  Clock,
+  RefreshCw,
+  Trash2,
+  ArrowUpRight,
+  Sparkles,
+  Video,
+  Globe,
+  Bell,
+  AlignLeft,
+  Search,
+  Filter,
+  CheckCircle2,
+  CalendarDays,
+} from 'lucide-react';
 import { toastService } from '../../../services/toast';
 
 interface ScheduledCallsViewProps {
@@ -20,9 +37,61 @@ export const ScheduledCallsView: React.FC<ScheduledCallsViewProps> = ({ onJoinCa
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [startTime, setStartTime] = useState('');
+  const [callType, setCallType] = useState('HD_VIDEO');
+  const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+  const [reminderMinutes, setReminderMinutes] = useState(15);
   const [description, setDescription] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [isSyncing, setIsSyncing] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+
+  // Quick preset dates generator
+  const setQuickOffset = (minutesFromNow: number) => {
+    const d = new Date(Date.now() + minutesFromNow * 60 * 1000);
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const localIso = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    setStartTime(localIso);
+  };
+
+  const setDateTomorrowAt = (hour: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    d.setHours(hour, 0, 0, 0);
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const localIso = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    setStartTime(localIso);
+  };
+
+  const setDateNextMondayAt = (hour: number) => {
+    const d = new Date();
+    const day = d.getDay();
+    const distance = (1 + 7 - day) % 7 || 7;
+    d.setDate(d.getDate() + distance);
+    d.setHours(hour, 0, 0, 0);
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const localIso = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    setStartTime(localIso);
+  };
+
+  // Formatted human-friendly preview
+  const formattedPreview = useMemo(() => {
+    if (!startTime) return null;
+    try {
+      const d = new Date(startTime);
+      if (isNaN(d.getTime())) return null;
+      return d.toLocaleString(undefined, {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+    } catch {
+      return null;
+    }
+  }, [startTime]);
 
   const handleManualSync = async () => {
     setIsSyncing(true);
@@ -51,7 +120,8 @@ export const ScheduledCallsView: React.FC<ScheduledCallsViewProps> = ({ onJoinCa
         title: cleanTitle,
         scheduledStartTime: new Date(startTime).toISOString(),
         description: description.trim() || undefined,
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+        timezone: timezone || 'UTC',
+        reminderMinutes: Number(reminderMinutes) || 15,
       });
 
       toastService.success(`Call "${cleanTitle}" scheduled successfully!`);
@@ -85,6 +155,17 @@ export const ScheduledCallsView: React.FC<ScheduledCallsViewProps> = ({ onJoinCa
     onJoinCall?.(targetId);
   };
 
+  // Filtered calls
+  const filteredCalls = useMemo(() => {
+    return (scheduledCalls || []).filter((call) => {
+      const matchesSearch =
+        call.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (call.description && call.description.toLowerCase().includes(searchQuery.toLowerCase()));
+      const matchesFilter = filterStatus === 'ALL' || call.status === filterStatus;
+      return matchesSearch && matchesFilter;
+    });
+  }, [scheduledCalls, searchQuery, filterStatus]);
+
   return (
     <div
       style={{
@@ -92,7 +173,7 @@ export const ScheduledCallsView: React.FC<ScheduledCallsViewProps> = ({ onJoinCa
         width: '100%',
         height: '100%',
         overflowY: 'auto',
-        backgroundColor: '#090d16',
+        backgroundColor: 'var(--nv-bg-canvas, #090d16)',
         color: '#f8fafc',
         fontFamily: 'var(--nv-font-sans)',
         boxSizing: 'border-box',
@@ -126,7 +207,7 @@ export const ScheduledCallsView: React.FC<ScheduledCallsViewProps> = ({ onJoinCa
               WebkitTextFillColor: 'transparent',
             }}
           >
-            <Calendar size={26} color="#3b82f6" /> Scheduled Calls & Conferences
+            <Calendar size={26} color="#6366f1" /> Scheduled Calls & Conferences
           </h2>
           <p style={{ margin: 0, color: '#94a3b8', fontSize: '14px' }}>
             Plan ahead with calendar-synced audio/video calls, invitations, and automated reminders.
@@ -163,16 +244,16 @@ export const ScheduledCallsView: React.FC<ScheduledCallsViewProps> = ({ onJoinCa
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
-              padding: '9px 18px',
-              background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+              gap: '7px',
+              padding: '10px 20px',
+              background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
               color: '#fff',
               border: 'none',
-              borderRadius: '10px',
+              borderRadius: '12px',
               fontWeight: 700,
               fontSize: '13px',
               cursor: 'pointer',
-              boxShadow: '0 4px 14px rgba(59, 130, 246, 0.35)',
+              boxShadow: '0 4px 16px rgba(99, 102, 241, 0.4)',
               transition: 'all 150ms ease',
             }}
           >
@@ -181,101 +262,193 @@ export const ScheduledCallsView: React.FC<ScheduledCallsViewProps> = ({ onJoinCa
         </div>
       </div>
 
+      {/* Sassy Search & Filter Bar */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          marginBottom: '20px',
+          flexWrap: 'wrap',
+        }}
+      >
+        <div style={{ flex: '1 1 320px', minWidth: '240px' }} className="sassy-input-wrap">
+          <span className="sassy-input-icon">
+            <Search size={16} />
+          </span>
+          <input
+            type="text"
+            className="sassy-input"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search scheduled conferences by title or agenda..."
+          />
+        </div>
+
+        <div style={{ width: '180px' }} className="sassy-input-wrap">
+          <span className="sassy-input-icon">
+            <Filter size={15} />
+          </span>
+          <select
+            className="sassy-select"
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+          >
+            <option value="ALL">All Statuses</option>
+            <option value="SCHEDULED">Scheduled</option>
+            <option value="ACTIVE">Active Now</option>
+            <option value="COMPLETED">Completed</option>
+            <option value="CANCELLED">Cancelled</option>
+          </select>
+        </div>
+      </div>
+
       {/* Main Content */}
       {isLoadingScheduledCalls ? (
         <div
           style={{
-            padding: '36px',
-            borderRadius: '14px',
+            padding: '48px',
+            borderRadius: '16px',
             backgroundColor: 'rgba(15, 23, 42, 0.6)',
-            border: '1px solid rgba(255, 255, 255, 0.06)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
             display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '10px',
+            gap: '12px',
             color: '#94a3b8',
             fontSize: '14px',
           }}
         >
-          <RefreshCw size={18} className="animate-spin" color="#3b82f6" />
-          <span>Loading scheduled conferences...</span>
+          <RefreshCw size={24} className="animate-spin" color="#6366f1" />
+          <span>Synchronizing encrypted conference sessions...</span>
         </div>
-      ) : scheduledCalls.length === 0 ? (
+      ) : filteredCalls.length === 0 ? (
         <div
           style={{
-            padding: '48px 24px',
+            padding: '54px 28px',
             backgroundColor: 'rgba(15, 23, 42, 0.5)',
-            borderRadius: '16px',
+            borderRadius: '20px',
             textAlign: 'center',
             color: '#94a3b8',
-            border: '1px dashed rgba(255,255,255,0.1)',
+            border: '1px dashed rgba(255, 255, 255, 0.12)',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            gap: '12px',
+            gap: '14px',
           }}
         >
           <div
             style={{
-              width: '48px',
-              height: '48px',
+              width: '54px',
+              height: '54px',
               borderRadius: '50%',
-              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              backgroundColor: 'rgba(99, 102, 241, 0.12)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              border: '1px solid rgba(99, 102, 241, 0.25)',
             }}
           >
-            <Calendar size={24} color="#60a5fa" />
+            <Calendar size={26} color="#818cf8" />
           </div>
-          <h4 style={{ fontSize: '15px', fontWeight: 600, color: '#f1f5f9', margin: 0 }}>
-            No calls scheduled yet.
+          <h4 style={{ fontSize: '16px', fontWeight: 700, color: '#f1f5f9', margin: 0 }}>
+            {searchQuery || filterStatus !== 'ALL'
+              ? 'No matching conferences found'
+              : 'No upcoming calls scheduled'}
           </h4>
-          <p style={{ margin: 0, fontSize: '13px', color: '#64748b', maxWidth: '400px' }}>
-            Arrange your next team sync, one-on-one, or multi-party video conference in advance.
+          <p style={{ margin: 0, fontSize: '13px', color: '#64748b', maxWidth: '420px', lineHeight: 1.5 }}>
+            {searchQuery || filterStatus !== 'ALL'
+              ? 'Try modifying your search keywords or filter status above.'
+              : 'Plan ahead with calendar-synced audio/video calls, invitations, and automated reminders.'}
           </p>
           <button
             type="button"
             onClick={() => setIsModalOpen(true)}
             style={{
-              marginTop: '6px',
-              padding: '8px 18px',
-              borderRadius: '8px',
-              backgroundColor: 'rgba(59, 130, 246, 0.15)',
-              border: '1px solid rgba(59, 130, 246, 0.35)',
-              color: '#93c5fd',
+              marginTop: '8px',
+              padding: '10px 22px',
+              borderRadius: '10px',
+              backgroundColor: 'rgba(99, 102, 241, 0.15)',
+              border: '1px solid rgba(99, 102, 241, 0.35)',
+              color: '#a5b4fc',
               fontSize: '13px',
-              fontWeight: 600,
+              fontWeight: 700,
               cursor: 'pointer',
+              transition: 'all 150ms ease',
             }}
           >
             + Schedule Your First Call
           </button>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {scheduledCalls.map((call) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          {filteredCalls.map((call) => (
             <div
               key={call.id}
+              className="calling-interactive-row"
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                padding: '18px 24px',
+                padding: '20px 26px',
                 backgroundColor: 'rgba(15, 23, 42, 0.75)',
-                borderRadius: '14px',
-                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '16px',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
                 boxShadow: '0 4px 20px rgba(0, 0, 0, 0.25)',
-                transition: 'all 150ms ease',
+                transition: 'all 180ms ease',
               }}
             >
               <div>
-                <div style={{ fontWeight: 700, fontSize: '15px', color: '#f8fafc', marginBottom: '6px' }}>
-                  {call.title}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                  <span style={{ fontWeight: 700, fontSize: '16px', color: '#f8fafc' }}>
+                    {call.title}
+                  </span>
+                  <span
+                    style={{
+                      padding: '3px 9px',
+                      borderRadius: '9999px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      letterSpacing: '0.04em',
+                      textTransform: 'uppercase',
+                      backgroundColor:
+                        call.status === 'SCHEDULED'
+                          ? 'rgba(99, 102, 241, 0.15)'
+                          : call.status === 'ACTIVE'
+                          ? 'rgba(16, 185, 129, 0.15)'
+                          : 'rgba(100, 116, 139, 0.15)',
+                      color:
+                        call.status === 'SCHEDULED'
+                          ? '#818cf8'
+                          : call.status === 'ACTIVE'
+                          ? '#34d399'
+                          : '#94a3b8',
+                      border: `1px solid ${
+                        call.status === 'SCHEDULED'
+                          ? 'rgba(99, 102, 241, 0.3)'
+                          : call.status === 'ACTIVE'
+                          ? 'rgba(16, 185, 129, 0.3)'
+                          : 'rgba(100, 116, 139, 0.3)'
+                      }`,
+                    }}
+                  >
+                    {call.status}
+                  </span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', color: '#94a3b8' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <Clock size={14} color="#60a5fa" />
+
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '12px',
+                    fontSize: '12.5px',
+                    color: '#94a3b8',
+                  }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#cbd5e1' }}>
+                    <Clock size={14} color="#818cf8" />
                     {new Date(call.scheduledStartTime).toLocaleString([], {
                       month: 'short',
                       day: 'numeric',
@@ -285,13 +458,14 @@ export const ScheduledCallsView: React.FC<ScheduledCallsViewProps> = ({ onJoinCa
                     })}
                   </span>
                   <span>•</span>
-                  <span>
-                    Status: <strong style={{ color: '#38bdf8' }}>{call.status}</strong>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Globe size={13} color="#64748b" />
+                    <span>{call.timezone || 'UTC'}</span>
                   </span>
                   {call.description && (
                     <>
                       <span>•</span>
-                      <span style={{ color: '#cbd5e1' }}>{call.description}</span>
+                      <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>{call.description}</span>
                     </>
                   )}
                 </div>
@@ -305,19 +479,19 @@ export const ScheduledCallsView: React.FC<ScheduledCallsViewProps> = ({ onJoinCa
                     display: 'flex',
                     alignItems: 'center',
                     gap: '6px',
-                    padding: '8px 16px',
+                    padding: '9px 18px',
                     background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
                     color: '#fff',
                     border: 'none',
-                    borderRadius: '8px',
-                    fontWeight: 600,
-                    fontSize: '12px',
+                    borderRadius: '10px',
+                    fontWeight: 700,
+                    fontSize: '12.5px',
                     cursor: 'pointer',
-                    boxShadow: '0 2px 10px rgba(16, 185, 129, 0.3)',
+                    boxShadow: '0 2px 12px rgba(16, 185, 129, 0.35)',
                   }}
                 >
                   <span>Join</span>
-                  <ArrowUpRight size={13} />
+                  <ArrowUpRight size={14} />
                 </button>
                 <button
                   type="button"
@@ -326,15 +500,16 @@ export const ScheduledCallsView: React.FC<ScheduledCallsViewProps> = ({ onJoinCa
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '4px',
-                    padding: '8px 14px',
-                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                    color: '#f87171',
-                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                    borderRadius: '8px',
+                    gap: '5px',
+                    padding: '9px 14px',
+                    backgroundColor: 'rgba(244, 63, 94, 0.1)',
+                    color: '#fb7185',
+                    border: '1px solid rgba(244, 63, 94, 0.25)',
+                    borderRadius: '10px',
                     fontWeight: 600,
-                    fontSize: '12px',
+                    fontSize: '12.5px',
                     cursor: 'pointer',
+                    transition: 'all 150ms ease',
                   }}
                 >
                   <Trash2 size={13} />
@@ -346,61 +521,56 @@ export const ScheduledCallsView: React.FC<ScheduledCallsViewProps> = ({ onJoinCa
         </div>
       )}
 
-      {/* Schedule Call Modal */}
+      {/* Sassy Extra Premium Schedule Call Modal */}
       {isModalOpen && (
         <div
           role="dialog"
           aria-modal="true"
           aria-labelledby="schedule-modal-title"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(4, 7, 14, 0.75)',
-            backdropFilter: 'blur(10px)',
-            WebkitBackdropFilter: 'blur(10px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999,
-            padding: '20px',
-          }}
+          className="glass-modal-backdrop"
           onClick={() => !isScheduling && setIsModalOpen(false)}
         >
           <div
+            className="sassy-dialog"
             style={{
               width: '100%',
-              maxWidth: '480px',
-              backgroundColor: '#0f172a',
-              borderRadius: '16px',
-              padding: '28px',
-              border: '1px solid rgba(255, 255, 255, 0.14)',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
+              maxWidth: '540px',
+              padding: '30px',
               color: '#f8fafc',
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {/* Modal Header */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '22px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <div
                   style={{
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '10px',
-                    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '12px',
+                    backgroundColor: 'rgba(99, 102, 241, 0.15)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    border: '1px solid rgba(59, 130, 246, 0.3)',
+                    border: '1px solid rgba(99, 102, 241, 0.3)',
+                    boxShadow: '0 0 16px rgba(99, 102, 241, 0.2)',
                   }}
                 >
-                  <Calendar size={18} color="#60a5fa" />
+                  <CalendarDays size={22} color="#818cf8" />
                 </div>
                 <div>
-                  <h3 id="schedule-modal-title" style={{ margin: 0, fontSize: '17px', fontWeight: 800 }}>
-                    Schedule a Call
+                  <h3 id="schedule-modal-title" style={{ margin: 0, fontSize: '18px', fontWeight: 800 }}>
+                    Schedule Conference
                   </h3>
-                  <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>
-                    Set up a scheduled audio or video conference with invitations.
+                  <p style={{ margin: '2px 0 0', fontSize: '12.5px', color: '#94a3b8' }}>
+                    Calendar-synced, end-to-end encrypted audio & video session.
                   </p>
                 </div>
               </div>
@@ -410,108 +580,253 @@ export const ScheduledCallsView: React.FC<ScheduledCallsViewProps> = ({ onJoinCa
                 onClick={() => !isScheduling && setIsModalOpen(false)}
                 disabled={isScheduling}
                 style={{
-                  background: 'transparent',
-                  border: 'none',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '10px',
                   color: '#94a3b8',
                   cursor: isScheduling ? 'not-allowed' : 'pointer',
-                  padding: '4px',
+                  padding: '6px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 150ms ease',
                 }}
               >
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div>
-                <label htmlFor="scheduled-title" style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '6px' }}>
-                  Title
+            {/* Modal Form */}
+            <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+              {/* Title Field */}
+              <div className="sassy-form-group">
+                <label className="sassy-label" htmlFor="scheduled-title">
+                  <span className="sassy-label-left">
+                    <Sparkles size={13} color="#818cf8" /> Conference Title
+                  </span>
+                  <span className="sassy-badge-required">Required</span>
                 </label>
-                <input
-                  id="scheduled-title"
-                  type="text"
-                  required
-                  disabled={isScheduling}
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Design Architecture Review"
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    borderRadius: '10px',
-                    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                    border: '1px solid rgba(255, 255, 255, 0.12)',
-                    color: '#f8fafc',
-                    fontSize: '14px',
-                    boxSizing: 'border-box',
-                    outline: 'none',
-                  }}
-                />
+                <div className="sassy-input-wrap">
+                  <span className="sassy-input-icon">
+                    <Sparkles size={16} />
+                  </span>
+                  <input
+                    id="scheduled-title"
+                    type="text"
+                    required
+                    disabled={isScheduling}
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="e.g. Design Architecture Review"
+                    className="sassy-input"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label htmlFor="scheduled-start-time" style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '6px' }}>
-                  Date & Time
+              {/* Conference Type Dropdown */}
+              <div className="sassy-form-group">
+                <label className="sassy-label" htmlFor="scheduled-call-type">
+                  <span className="sassy-label-left">
+                    <Video size={13} color="#22d3ee" /> Session Mode & Quality
+                  </span>
+                  <span className="sassy-badge-optional">Encrypted</span>
                 </label>
-                <input
-                  id="scheduled-start-time"
-                  type="datetime-local"
-                  required
-                  disabled={isScheduling}
-                  value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    borderRadius: '10px',
-                    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                    border: '1px solid rgba(255, 255, 255, 0.12)',
-                    color: '#f8fafc',
-                    fontSize: '14px',
-                    boxSizing: 'border-box',
-                    outline: 'none',
-                  }}
-                />
+                <div className="sassy-input-wrap">
+                  <span className="sassy-input-icon">
+                    <Video size={16} color="#22d3ee" />
+                  </span>
+                  <select
+                    id="scheduled-call-type"
+                    className="sassy-select"
+                    value={callType}
+                    onChange={(e) => setCallType(e.target.value)}
+                    disabled={isScheduling}
+                  >
+                    <option value="HD_VIDEO">🎥 Encrypted HD Video & Screen Sharing</option>
+                    <option value="AUDIO_ONLY">🎙️ Ultra-Low Latency Audio Room</option>
+                    <option value="BROADCAST">📡 Broadcast / Keynote Presentation</option>
+                  </select>
+                </div>
               </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '6px' }}>
-                  Description (optional)
+              {/* Date & Time Field with Quick Preset Chips */}
+              <div className="sassy-form-group">
+                <label className="sassy-label" htmlFor="scheduled-start-time">
+                  <span className="sassy-label-left">
+                    <Calendar size={13} color="#818cf8" /> Date & Time
+                  </span>
+                  <span className="sassy-badge-required">Required</span>
+                </label>
+
+                <div className="sassy-input-wrap">
+                  <span className="sassy-input-icon">
+                    <Calendar size={16} />
+                  </span>
+                  <input
+                    id="scheduled-start-time"
+                    type="datetime-local"
+                    required
+                    disabled={isScheduling}
+                    value={startTime}
+                    onChange={(e) => setStartTime(e.target.value)}
+                    className="sassy-date-field"
+                  />
+                </div>
+
+                {/* Formatted live preview badge */}
+                {formattedPreview && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      fontSize: '12px',
+                      color: '#38bdf8',
+                      marginTop: '2px',
+                    }}
+                  >
+                    <CheckCircle2 size={13} />
+                    <span>Scheduled for: <strong>{formattedPreview}</strong></span>
+                  </div>
+                )}
+
+                {/* Quick Presets Chips */}
+                <div className="sassy-chip-row">
+                  <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>Quick:</span>
+                  <button
+                    type="button"
+                    className="sassy-chip"
+                    onClick={() => setQuickOffset(15)}
+                    disabled={isScheduling}
+                  >
+                    +15 mins
+                  </button>
+                  <button
+                    type="button"
+                    className="sassy-chip"
+                    onClick={() => setQuickOffset(60)}
+                    disabled={isScheduling}
+                  >
+                    +1 hour
+                  </button>
+                  <button
+                    type="button"
+                    className="sassy-chip"
+                    onClick={() => setDateTomorrowAt(10)}
+                    disabled={isScheduling}
+                  >
+                    Tomorrow 10 AM
+                  </button>
+                  <button
+                    type="button"
+                    className="sassy-chip"
+                    onClick={() => setDateNextMondayAt(14)}
+                    disabled={isScheduling}
+                  >
+                    Next Mon 2 PM
+                  </button>
+                </div>
+              </div>
+
+              {/* Two Column Row: Timezone & Notification Reminder Dropdowns */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                {/* Timezone Dropdown */}
+                <div className="sassy-form-group">
+                  <label className="sassy-label" htmlFor="scheduled-timezone">
+                    <span className="sassy-label-left">
+                      <Globe size={13} color="#818cf8" /> Timezone
+                    </span>
+                  </label>
+                  <div className="sassy-input-wrap">
+                    <span className="sassy-input-icon">
+                      <Globe size={15} />
+                    </span>
+                    <select
+                      id="scheduled-timezone"
+                      className="sassy-select"
+                      value={timezone}
+                      onChange={(e) => setTimezone(e.target.value)}
+                      disabled={isScheduling}
+                    >
+                      <option value={Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'}>
+                        {Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local (System)'}
+                      </option>
+                      <option value="UTC">UTC (Universal Standard)</option>
+                      <option value="America/New_York">US Eastern (New York)</option>
+                      <option value="America/Chicago">US Central (Chicago)</option>
+                      <option value="America/Los_Angeles">US Pacific (San Francisco)</option>
+                      <option value="Europe/London">UK / GMT (London)</option>
+                      <option value="Europe/Paris">Central Europe (Paris/Berlin)</option>
+                      <option value="Asia/Kolkata">India (IST • UTC+5:30)</option>
+                      <option value="Asia/Singapore">Singapore / Hong Kong (SGT)</option>
+                      <option value="Asia/Tokyo">Japan (JST • Tokyo)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Reminder Notification Dropdown */}
+                <div className="sassy-form-group">
+                  <label className="sassy-label" htmlFor="scheduled-reminder">
+                    <span className="sassy-label-left">
+                      <Bell size={13} color="#f59e0b" /> Reminder
+                    </span>
+                  </label>
+                  <div className="sassy-input-wrap">
+                    <span className="sassy-input-icon">
+                      <Bell size={15} color="#f59e0b" />
+                    </span>
+                    <select
+                      id="scheduled-reminder"
+                      className="sassy-select"
+                      value={reminderMinutes}
+                      onChange={(e) => setReminderMinutes(Number(e.target.value))}
+                      disabled={isScheduling}
+                    >
+                      <option value={5}>5 mins before</option>
+                      <option value={15}>15 mins before (Recommended)</option>
+                      <option value={30}>30 mins before</option>
+                      <option value={60}>1 hour before</option>
+                      <option value={1440}>1 day before</option>
+                      <option value={0}>Do not remind</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Description / Agenda Textarea */}
+              <div className="sassy-form-group">
+                <label className="sassy-label">
+                  <span className="sassy-label-left">
+                    <AlignLeft size={13} color="#94a3b8" /> Agenda & Briefing
+                  </span>
+                  <span className="sassy-badge-optional">Optional</span>
                 </label>
                 <textarea
                   value={description}
                   disabled={isScheduling}
                   onChange={(e) => setDescription(e.target.value)}
                   rows={3}
-                  placeholder="Meeting agenda, briefing, or details..."
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    borderRadius: '10px',
-                    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                    border: '1px solid rgba(255, 255, 255, 0.12)',
-                    color: '#f8fafc',
-                    fontSize: '13px',
-                    boxSizing: 'border-box',
-                    outline: 'none',
-                    resize: 'vertical',
-                  }}
+                  placeholder="Meeting agenda items, briefing notes, or participant preparation details..."
+                  className="sassy-textarea"
                 />
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
                   disabled={isScheduling}
                   style={{
-                    padding: '9px 18px',
+                    padding: '11px 20px',
                     backgroundColor: 'rgba(255, 255, 255, 0.05)',
                     border: '1px solid rgba(255, 255, 255, 0.1)',
-                    borderRadius: '10px',
+                    borderRadius: '12px',
                     color: '#cbd5e1',
-                    fontSize: '13px',
+                    fontSize: '13.5px',
                     fontWeight: 600,
                     cursor: isScheduling ? 'not-allowed' : 'pointer',
+                    transition: 'all 150ms ease',
                   }}
                 >
                   Cancel
@@ -523,27 +838,28 @@ export const ScheduledCallsView: React.FC<ScheduledCallsViewProps> = ({ onJoinCa
                     display: 'flex',
                     alignItems: 'center',
                     gap: '8px',
-                    padding: '9px 22px',
-                    background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                    padding: '11px 26px',
+                    background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
                     border: 'none',
-                    borderRadius: '10px',
+                    borderRadius: '12px',
                     color: '#ffffff',
                     fontWeight: 700,
-                    fontSize: '13px',
+                    fontSize: '13.5px',
                     cursor: isScheduling ? 'not-allowed' : 'pointer',
-                    boxShadow: '0 4px 14px rgba(59, 130, 246, 0.35)',
+                    boxShadow: '0 4px 18px rgba(99, 102, 241, 0.45)',
                     opacity: isScheduling ? 0.7 : 1,
+                    transition: 'all 150ms ease',
                   }}
                 >
                   {isScheduling ? (
                     <>
-                      <RefreshCw size={15} className="animate-spin" />
-                      <span>Scheduling...</span>
+                      <RefreshCw size={16} className="animate-spin" />
+                      <span>Scheduling Session...</span>
                     </>
                   ) : (
                     <>
-                      <Sparkles size={15} />
-                      <span>Schedule Call</span>
+                      <Sparkles size={16} />
+                      <span>Schedule Conference</span>
                     </>
                   )}
                 </button>

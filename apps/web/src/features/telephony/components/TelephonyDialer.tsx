@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Phone, PhoneOff, Mic, MicOff, Pause, Play, AlertTriangle, Delete } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, Pause, Play, AlertTriangle, Delete, PhoneCall } from 'lucide-react';
 import { useInitiatePstnCall, useSendDtmf, usePhoneNumbers } from '../hooks/use-telephony';
 import { toastService } from '../../../services/toast';
 
@@ -148,54 +148,55 @@ export const TelephonyDialer: React.FC = () => {
       </div>
 
       {/* Outbound Caller ID Selector */}
-      <div style={{ marginBottom: '14px' }}>
-        <label style={{ display: 'block', fontSize: '12px', fontWeight: 500, color: '#94a3b8', marginBottom: '6px' }}>
-          Outbound Caller ID
+      <div className="sassy-form-group" style={{ marginBottom: '18px' }}>
+        <label className="sassy-label">
+          <span className="sassy-label-left">
+            <PhoneCall size={13} color="#818cf8" /> Outbound Caller ID
+          </span>
+          <span className="sassy-badge-optional">E.164 Verified</span>
         </label>
-        <select
-          value={selectedCallerId}
-          onChange={(e) => setSelectedCallerId(e.target.value)}
-          disabled={Boolean(activeCallSessionId)}
-          style={{
-            width: '100%',
-            padding: '8px 12px',
-            backgroundColor: '#1e293b',
-            border: '1px solid #334155',
-            borderRadius: '8px',
-            color: '#f8fafc',
-            fontSize: '13px',
-          }}
-        >
-          <option value="">Default Organization DID</option>
-          {activeNumbers.map((num) => (
-            <option key={num.id} value={num.e164Number}>
-              {num.displayNumber} ({num.countryCode} {num.type})
-            </option>
-          ))}
-        </select>
+        <div className="sassy-input-wrap">
+          <span className="sassy-input-icon">
+            <PhoneCall size={15} color="#818cf8" />
+          </span>
+          <select
+            value={selectedCallerId}
+            onChange={(e) => setSelectedCallerId(e.target.value)}
+            disabled={Boolean(activeCallSessionId)}
+            className="sassy-select"
+          >
+            <option value="">Default Organization DID (+1 800-NEXAVOICE)</option>
+            {activeNumbers.map((num) => (
+              <option key={num.id} value={num.e164Number}>
+                {num.displayNumber} ({num.countryCode} {num.type})
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Destination Phone Number Display */}
-      <div style={{ position: 'relative', marginBottom: '20px' }}>
+      <div style={{ position: 'relative', marginBottom: '22px' }}>
         <input
           type="text"
           value={destination}
           onChange={(e) => setDestination(e.target.value)}
           placeholder="+1 (555) 000-0000"
           disabled={Boolean(activeCallSessionId)}
+          className="sassy-input"
           style={{
-            width: '100%',
-            padding: '12px 42px 12px 16px',
-            boxSizing: 'border-box',
-            backgroundColor: '#090d16',
-            border: '1px solid #334155',
-            borderRadius: '10px',
-            color: '#a5b4fc',
-            fontFamily: 'monospace',
-            fontSize: '20px',
-            fontWeight: 600,
+            padding: '14px 44px 14px 16px',
+            fontFamily: 'var(--nv-font-mono, monospace)',
+            fontSize: '22px',
+            fontWeight: 700,
             textAlign: 'center',
-            letterSpacing: '1px',
+            letterSpacing: '2px',
+            color: '#a5b4fc',
+            background: 'rgba(9, 13, 22, 0.85)',
+            borderColor: destination ? 'rgba(99, 102, 241, 0.4)' : 'rgba(255, 255, 255, 0.1)',
+            boxShadow: destination
+              ? '0 0 16px rgba(99, 102, 241, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
+              : 'inset 0 1px 0 rgba(255, 255, 255, 0.05)',
           }}
           aria-label="Destination Telephone Number"
         />

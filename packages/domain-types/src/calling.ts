@@ -10,12 +10,12 @@ export enum CallType {
 
 export enum CallSessionStatus {
   NEW = 'NEW',
-  INITIATING = 'NEW', // Backwards-compatible alias
+  INITIATING = 'INITIATING',
   RINGING = 'RINGING',
   CONNECTING = 'CONNECTING',
   ACTIVE = 'ACTIVE',
   HELD = 'HELD',
-  ON_HOLD = 'HELD', // Backwards-compatible alias
+  ON_HOLD = 'ON_HOLD',
   INTERRUPTED = 'INTERRUPTED',
   ENDING = 'ENDING',
   ENDED = 'ENDED',
@@ -26,6 +26,13 @@ export enum CallSessionStatus {
 
 export const VALID_CALL_SESSION_TRANSITIONS: Record<CallSessionStatus, CallSessionStatus[]> = {
   [CallSessionStatus.NEW]: [
+    CallSessionStatus.RINGING,
+    CallSessionStatus.CONNECTING,
+    CallSessionStatus.FAILED,
+    CallSessionStatus.ENDED,
+    CallSessionStatus.MISSED,
+  ],
+  [CallSessionStatus.INITIATING]: [
     CallSessionStatus.RINGING,
     CallSessionStatus.CONNECTING,
     CallSessionStatus.FAILED,
@@ -47,11 +54,17 @@ export const VALID_CALL_SESSION_TRANSITIONS: Record<CallSessionStatus, CallSessi
   ],
   [CallSessionStatus.ACTIVE]: [
     CallSessionStatus.HELD,
+    CallSessionStatus.ON_HOLD,
     CallSessionStatus.INTERRUPTED,
     CallSessionStatus.ENDING,
     CallSessionStatus.ENDED,
   ],
   [CallSessionStatus.HELD]: [
+    CallSessionStatus.ACTIVE,
+    CallSessionStatus.ENDING,
+    CallSessionStatus.ENDED,
+  ],
+  [CallSessionStatus.ON_HOLD]: [
     CallSessionStatus.ACTIVE,
     CallSessionStatus.ENDING,
     CallSessionStatus.ENDED,
@@ -74,7 +87,10 @@ export const VALID_CALL_SESSION_TRANSITIONS: Record<CallSessionStatus, CallSessi
 
 export function canTransitionCallSession(from: CallSessionStatus, to: CallSessionStatus): boolean {
   if (from === to) return true;
-  const allowed = VALID_CALL_SESSION_TRANSITIONS[from];
+  const normalizedFrom: CallSessionStatus =
+    (from as any) === 'INITIATING' ? CallSessionStatus.INITIATING :
+    (from as any) === 'ON_HOLD' ? CallSessionStatus.ON_HOLD : from;
+  const allowed = VALID_CALL_SESSION_TRANSITIONS[normalizedFrom] || VALID_CALL_SESSION_TRANSITIONS[from];
   return allowed ? allowed.includes(to) : false;
 }
 

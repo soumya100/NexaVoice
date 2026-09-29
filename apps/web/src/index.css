@@ -362,3 +362,245 @@ svg.animate-spin,
   to { opacity: 1; transform: scale(1); }
 }
 
+/* =============================================================
+   NexaVoice Extra Premium SASSY Form Controls & Design System
+   ============================================================= */
+
+/* Global dark mode color-scheme for native browser pickers */
+input, select, textarea {
+  color-scheme: dark;
+}
+
+/* Sassy Input & Select Base Tokens */
+.sassy-input,
+.sassy-select,
+.sassy-textarea,
+.sassy-date-field {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--nv-font-sans);
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 11px 16px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 2px 8px -1px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  outline: none;
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sassy-input:hover,
+.sassy-select:hover,
+.sassy-textarea:hover,
+.sassy-date-field:hover {
+  background: rgba(23, 32, 51, 0.8);
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 14px -2px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.sassy-input:focus,
+.sassy-select:focus,
+.sassy-textarea:focus,
+.sassy-date-field:focus {
+  background: rgba(23, 32, 51, 0.95);
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25), 0 8px 24px -4px rgba(99, 102, 241, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
+}
+
+.sassy-input::placeholder,
+.sassy-textarea::placeholder {
+  color: #64748b;
+  font-weight: 400;
+}
+
+/* Sassy Select Special Styling */
+.sassy-select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 40px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23818cf8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 16px;
+  cursor: pointer;
+}
+
+.sassy-select option {
+  background-color: #0f172a;
+  color: #f8fafc;
+  padding: 10px 14px;
+}
+
+.sassy-select option:hover,
+.sassy-select option:checked {
+  background-color: #1e293b;
+  color: #818cf8;
+}
+
+/* Sassy Date Field Special Styling */
+.sassy-date-field {
+  cursor: pointer;
+  letter-spacing: -0.01em;
+}
+
+.sassy-date-field::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  background-color: rgba(99, 102, 241, 0.15);
+  filter: invert(0.85) sepia(0.5) hue-rotate(190deg) saturate(3);
+  transition: all 150ms ease;
+}
+
+.sassy-date-field::-webkit-calendar-picker-indicator:hover {
+  background-color: rgba(99, 102, 241, 0.35);
+  filter: invert(1) drop-shadow(0 0 6px #6366f1);
+  transform: scale(1.1);
+}
+
+/* Sassy Form Field Group & Labels */
+.sassy-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sassy-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #cbd5e1;
+}
+
+.sassy-label-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sassy-badge-required {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  background: rgba(244, 63, 94, 0.12);
+  color: #fb7185;
+  border: 1px solid rgba(244, 63, 94, 0.25);
+  text-transform: uppercase;
+}
+
+.sassy-badge-optional {
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  background: rgba(148, 163, 184, 0.1);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  text-transform: uppercase;
+}
+
+/* Sassy Quick Chip Buttons for dates/presets */
+.sassy-chip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.sassy-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: #cbd5e1;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sassy-chip:hover {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.35);
+  color: #a5b4fc;
+  transform: translateY(-1px);
+}
+
+.sassy-chip.active {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(6, 182, 212, 0.2));
+  border-color: #6366f1;
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.3);
+}
+
+/* Sassy Input Container with Leading Icon */
+.sassy-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.sassy-input-icon {
+  position: absolute;
+  left: 14px;
+  color: #818cf8;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.sassy-input-wrap .sassy-input,
+.sassy-input-wrap .sassy-select,
+.sassy-input-wrap .sassy-date-field {
+  padding-left: 42px;
+}
+
+/* Sassy Dialog Container */
+.sassy-dialog {
+  position: relative;
+  background: linear-gradient(165deg, rgba(23, 32, 51, 0.95) 0%, rgba(15, 23, 42, 0.98) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 24px;
+  box-shadow: 0 30px 70px -15px rgba(0, 0, 0, 0.8), 0 0 30px -5px rgba(99, 102, 241, 0.2);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  overflow: hidden;
+  transition: all 250ms ease;
+}
+
+.sassy-dialog::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #6366f1, #06b6d4, #d946ef, #6366f1);
+  background-size: 300% 100%;
+  animation: shimmerBorder 6s ease infinite;
+}
+
+@keyframes shimmerBorder {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+

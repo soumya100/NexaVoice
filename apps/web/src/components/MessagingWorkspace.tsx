@@ -1064,37 +1064,37 @@ export function MessagingWorkspace() {
               <div style={{ fontSize: '0.85rem', color: 'var(--nv-text-secondary)', marginBottom: '1rem', lineHeight: '1.4' }}>
                 Find users by <strong>NexaVoice ID</strong> or <strong>Username</strong> without exposing private emails or phone numbers.
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>
-                <input
-                  type="text"
-                  placeholder="Enter NV-ID or username..."
-                  value={discoveryQuery}
-                  onChange={(e) => setDiscoveryQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleSearchUsers();
-                  }}
-                  style={{
-                    flex: 1,
-                    background: 'var(--nv-bg-elevated)',
-                    border: '1px solid var(--nv-border)',
-                    borderRadius: '8px',
-                    padding: '0.5rem 0.75rem',
-                    color: 'var(--nv-text-primary)',
-                    fontSize: '0.85rem',
-                  }}
-                />
+              <div style={{ display: 'flex', gap: '0.65rem', marginBottom: '1.25rem' }}>
+                <div style={{ flex: 1 }} className="sassy-input-wrap">
+                  <span className="sassy-input-icon">
+                    <UserPlus size={16} color="#818cf8" />
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Enter NV-ID (e.g. NV-5144) or username..."
+                    value={discoveryQuery}
+                    onChange={(e) => setDiscoveryQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSearchUsers();
+                    }}
+                    className="sassy-input"
+                  />
+                </div>
                 <button
                   onClick={handleSearchUsers}
                   disabled={isSearchingUsers}
                   style={{
-                    background: 'var(--nv-primary)',
+                    background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
                     color: '#fff',
-                    padding: '0.5rem 1rem',
-                    borderRadius: '8px',
+                    padding: '0.5rem 1.15rem',
+                    borderRadius: '12px',
                     fontSize: '0.85rem',
-                    fontWeight: 600,
+                    fontWeight: 700,
                     cursor: isSearchingUsers ? 'not-allowed' : 'pointer',
                     opacity: isSearchingUsers ? 0.7 : 1,
+                    boxShadow: '0 4px 14px rgba(99, 102, 241, 0.35)',
+                    transition: 'all 150ms ease',
+                    whiteSpace: 'nowrap',
                   }}
                 >
                   {isSearchingUsers ? 'Searching...' : 'Search'}
