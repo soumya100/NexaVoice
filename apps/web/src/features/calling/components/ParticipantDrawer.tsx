@@ -1,4 +1,5 @@
 import React from 'react';
+import { Users, X, Mic, MicOff, ShieldCheck, UserX } from 'lucide-react';
 import { CallParticipant } from '../types';
 
 interface ParticipantDrawerProps {
@@ -27,75 +28,148 @@ export const ParticipantDrawer: React.FC<ParticipantDrawerProps> = ({
   return (
     <aside
       aria-label="Participants list"
-      className="fixed inset-y-0 right-0 z-40 w-80 bg-neutral-900 border-l border-neutral-800 p-5 shadow-2xl flex flex-col animate-in slide-in-from-right duration-200"
+      style={{
+        position: 'fixed',
+        top: 0,
+        bottom: 0,
+        right: 0,
+        width: '340px',
+        background: 'rgba(15, 23, 42, 0.95)',
+        backdropFilter: 'blur(24px)',
+        WebkitBackdropFilter: 'blur(24px)',
+        borderLeft: '1px solid rgba(255, 255, 255, 0.1)',
+        boxShadow: '-10px 0 40px rgba(0, 0, 0, 0.6)',
+        display: 'flex',
+        flexDirection: 'column',
+        zIndex: 50,
+        padding: '20px',
+        color: '#f8fafc',
+      }}
     >
-      <div className="flex items-center justify-between pb-4 border-b border-neutral-800">
-        <h3 className="text-base font-semibold text-white">
-          Participants ({participants.length})
-        </h3>
+      {/* Header */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingBottom: '16px',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Users size={18} color="#818cf8" />
+          <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#ffffff' }}>
+            Participants ({participants.length})
+          </h3>
+        </div>
         <button
           type="button"
           onClick={onClose}
           aria-label="Close participant drawer"
-          className="text-neutral-400 hover:text-white p-1 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400"
+          style={{
+            background: 'rgba(255, 255, 255, 0.06)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '8px',
+            color: '#94a3b8',
+            cursor: 'pointer',
+            padding: '6px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
         >
-          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
+          <X size={16} />
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-4 space-y-3">
+      {/* Participants List */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
         {participants.map((p) => {
           const isSelf = p.userId === currentUserId;
+          const initial = p.displayName ? p.displayName.charAt(0).toUpperCase() : 'U';
+
           return (
             <div
               key={p.userId}
-              className="flex items-center justify-between p-3 rounded-xl bg-neutral-800/50 border border-neutral-800"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '12px 14px',
+                borderRadius: '14px',
+                background: 'rgba(255, 255, 255, 0.04)',
+                border: '1px solid rgba(255, 255, 255, 0.06)',
+              }}
             >
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-600/30 text-indigo-400 font-semibold text-sm">
-                  {p.displayName.charAt(0).toUpperCase()}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '50%',
+                    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                    color: '#ffffff',
+                    fontWeight: 700,
+                    fontSize: '14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 2px 8px rgba(99, 102, 241, 0.3)',
+                  }}
+                >
+                  {initial}
                 </div>
                 <div>
-                  <div className="text-sm font-medium text-white flex items-center gap-1.5">
-                    {p.displayName} {isSelf && <span className="text-neutral-500 text-xs">(You)</span>}
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>{p.displayName}</span>
+                    {isSelf && (
+                      <span style={{ fontSize: '10px', color: '#94a3b8', background: 'rgba(255,255,255,0.08)', padding: '1px 6px', borderRadius: '4px' }}>
+                        You
+                      </span>
+                    )}
                   </div>
-                  <span className="text-[11px] text-neutral-400 uppercase font-semibold">
-                    {p.role} • {p.state}
-                  </span>
+                  {p.role && p.role !== 'PARTICIPANT' && (
+                    <div style={{ fontSize: '10px', color: '#a5b4fc', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '3px', marginTop: '2px' }}>
+                      <ShieldCheck size={11} /> {p.role}
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Action Controls for Moderators */}
-              <div className="flex items-center gap-1">
+              {/* Action Buttons for Moderators */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 {canMuteOthers && !isSelf && (
                   <button
                     type="button"
                     onClick={() => onMuteParticipant(p.userId, !p.isAudioMuted)}
-                    title={p.isAudioMuted ? 'Unmute' : 'Mute'}
-                    className={`p-1.5 rounded-lg text-xs ${
-                      p.isAudioMuted
-                        ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                        : 'text-neutral-400 hover:text-white hover:bg-neutral-700'
-                    }`}
+                    title={p.isAudioMuted ? 'Unmute participant' : 'Mute participant'}
+                    style={{
+                      padding: '6px',
+                      borderRadius: '8px',
+                      background: p.isAudioMuted ? 'rgba(239, 68, 68, 0.15)' : 'rgba(255, 255, 255, 0.08)',
+                      border: 'none',
+                      color: p.isAudioMuted ? '#f87171' : '#94a3b8',
+                      cursor: 'pointer',
+                    }}
                   >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-14 0m14 0a7 7 0 00-14 0m7 7v4m-4 0h8m-4-8a3 3 0 003-3V5a3 3 0 00-6 0v6a3 3 0 003 3z" />
-                    </svg>
+                    {p.isAudioMuted ? <MicOff size={14} /> : <Mic size={14} />}
                   </button>
                 )}
-
                 {canRemoveOthers && !isSelf && (
                   <button
                     type="button"
                     onClick={() => onRemoveParticipant(p.userId)}
-                    title="Remove from call"
-                    className="p-1.5 rounded-lg text-neutral-400 hover:text-red-400 hover:bg-red-500/10"
+                    title="Remove participant"
+                    style={{
+                      padding: '6px',
+                      borderRadius: '8px',
+                      background: 'rgba(239, 68, 68, 0.15)',
+                      border: 'none',
+                      color: '#f87171',
+                      cursor: 'pointer',
+                    }}
                   >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7a4 4 0 11-8 0 4 4 0 018 0zM9 14a6 6 0 00-6 6v1h12v-1a6 6 0 00-6-6zM21 12h-6" />
-                    </svg>
+                    <UserX size={14} />
                   </button>
                 )}
               </div>
@@ -106,3 +180,4 @@ export const ParticipantDrawer: React.FC<ParticipantDrawerProps> = ({
     </aside>
   );
 };
+
