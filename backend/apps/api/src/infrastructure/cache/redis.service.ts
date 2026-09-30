@@ -2,6 +2,7 @@ import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { StructuredLogger } from '../observability/structured-logger.service';
+import { RequestPerformanceContext } from '../../common/observability/request-performance.context';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
@@ -40,6 +41,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
         this.client = new Redis(rawUrl, {
           retryStrategy,
           lazyConnect: true,
+          connectTimeout: 5000,
+          commandTimeout: 2000,
+          maxRetriesPerRequest: 1,
         });
       } else {
         this.client = new Redis({
@@ -49,6 +53,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
           db,
           retryStrategy,
           lazyConnect: true,
+          connectTimeout: 5000,
+          commandTimeout: 2000,
+          maxRetriesPerRequest: 1,
         });
       }
 
@@ -97,20 +104,40 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   async get(key: string): Promise<string | null> {
     if (!this.client || !this.isConnected) return null;
-    return this.client.get(key);
+    const start = performance.now();
+    try {
+      const res = await this.client.get(key);
+      RequestPerformanceContext.current()?.recordRedis(performance.now() - start);
+      return res;
+    } catch (err: any) {
+      this.logger.warn(`Redis GET failed for ${key}: ${err.message}`);
+      return null;
+    }
   }
 
   async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
     if (!this.client || !this.isConnected) return;
-    if (ttlSeconds) {
-      await this.client.set(key, value, 'EX', ttlSeconds);
-    } else {
-      await this.client.set(key, value);
+    const start = performance.now();
+    try {
+      if (ttlSeconds) {
+        await this.client.set(key, value, 'EX', ttlSeconds);
+      } else {
+        await this.client.set(key, value);
+      }
+      RequestPerformanceContext.current()?.recordRedis(performance.now() - start);
+    } catch (err: any) {
+      this.logger.warn(`Redis SET failed for ${key}: ${err.message}`);
     }
   }
 
   async del(key: string): Promise<void> {
     if (!this.client || !this.isConnected) return;
-    await this.client.del(key);
+    const start = performance.now();
+    try {
+      await this.client.del(key);
+      RequestPerformanceContext.current()?.recordRedis(performance.now() - start);
+    } catch (err: any) {
+      this.logger.warn(`Redis DEL failed for ${key}: ${err.message}`);
+    }
   }
 }

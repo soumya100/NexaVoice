@@ -37,6 +37,22 @@ describe('ContactsService', () => {
         update: jest.fn(),
         updateMany: jest.fn(),
       },
+      contactGroup: {
+        findUnique: jest.fn(),
+        findUniqueOrThrow: jest.fn(),
+        findMany: jest.fn(),
+        create: jest.fn(),
+        delete: jest.fn(),
+      },
+      contactGroupMember: {
+        findUnique: jest.fn(),
+        upsert: jest.fn(),
+        delete: jest.fn(),
+        deleteMany: jest.fn(),
+      },
+      outboxEvent: {
+        create: jest.fn().mockResolvedValue({ id: 'outbox-1' }),
+      },
       $transaction: jest.fn((cb) => cb(mockPrisma)),
     };
 
@@ -292,6 +308,178 @@ describe('ContactsService', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('Contact Groups & Favorites', () => {
+    it('creates a user-defined contact group', async () => {
+      mockPrisma.contactGroup.findUnique.mockResolvedValue(null);
+      mockPrisma.contactGroup.create.mockResolvedValue({
+        id: 'group-1',
+        userId: 'user-1',
+        name: 'Team Alpha',
+        color: '#3b82f6',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        members: [],
+      });
+
+      const group = await service.createContactGroup('user-1', {
+        name: 'Team Alpha',
+        color: '#3b82f6',
+      });
+
+      expect(group.id).toBe('group-1');
+      expect(group.name).toBe('Team Alpha');
+      expect(group.memberCount).toBe(0);
+    });
+
+    it('adds an accepted contact to a group', async () => {
+      mockPrisma.contactGroup.findUnique.mockResolvedValue({
+        id: 'group-1',
+        userId: 'user-1',
+        name: 'Team Alpha',
+      });
+      mockPrisma.contactRelationship.findFirst.mockResolvedValue({
+        id: 'rel-1',
+        status: ContactRelationshipStatus.ACCEPTED,
+      });
+      mockPrisma.contactGroup.findUniqueOrThrow.mockResolvedValue({
+        id: 'group-1',
+        userId: 'user-1',
+        name: 'Team Alpha',
+        members: [
+          {
+            id: 'mem-1',
+            contactUserId: 'contact-2',
+            addedAt: new Date(),
+            contactUser: {
+              id: 'contact-2',
+              nexaVoiceId: 'NV-C2',
+              username: 'c2',
+              displayName: 'Contact 2',
+            },
+          },
+        ],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const updated = await service.addContactToGroup('user-1', {
+        groupId: 'group-1',
+        contactUserId: 'contact-2',
+      });
+
+      expect(updated.memberCount).toBe(1);
+      expect(mockPrisma.contactGroupMember.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            groupId_contactUserId: { groupId: 'group-1', contactUserId: 'contact-2' },
+          },
+        }),
+      );
+    });
+
+    it('toggles contact favorite status', async () => {
+      mockPrisma.contactGroup.findUnique.mockResolvedValue({
+        id: 'group-fav',
+        userId: 'user-1',
+        name: 'Favorites',
+      });
+      mockPrisma.contactGroupMember.findUnique.mockResolvedValueOnce(null); // Not yet favorite
+      mockPrisma.contactRelationship.findFirst.mockResolvedValue({
+        id: 'rel-1',
+        status: ContactRelationshipStatus.ACCEPTED,
+      });
+      mockPrisma.contactGroup.findUniqueOrThrow.mockResolvedValue({
+        id: 'group-fav',
+        userId: 'user-1',
+        name: 'Favorites',
+        members: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const added = await service.toggleFavorite('user-1', 'contact-2');
+      expect(added).toBe(true);
+
+      mockPrisma.contactGroupMember.findUnique.mockResolvedValueOnce({ id: 'mem-fav-1' });
+      const removed = await service.toggleFavorite('user-1', 'contact-2');
+      expect(removed).toBe(false);
+      expect(mockPrisma.contactGroupMember.delete).toHaveBeenCalledWith({
+        where: { id: 'mem-fav-1' },
+      });
+    });
+  });
+
+  describe('Organization Directory', () => {
+    it('returns filtered organization members scoped to caller organization', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-caller',
+        organizationId: 'org_acme',
+      });
+
+      mockPrisma.user.findMany.mockResolvedValue([
+        {
+          id: 'user-10',
+          organizationId: 'org_acme',
+          displayName: 'Sarah Connor',
+          username: 'sconnor',
+          email: 'sarah@acme.com',
+          department: 'Engineering',
+          jobTitle: 'Lead Architect',
+          status: 'ONLINE',
+        },
+      ]);
+
+      const members = await service.getOrganizationDirectory('user-caller', {
+        department: 'Engineering',
+      });
+
+      expect(members).toHaveLength(1);
+      expect(members[0].displayName).toBe('Sarah Connor');
+      expect(members[0].department).toBe('Engineering');
+      expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            organizationId: 'org_acme',
+            department: { equals: 'Engineering', mode: 'insensitive' },
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('Transactional Outbox Integration', () => {
+    it('emits outbox event on contact request sent', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue({
+        id: 'user-recip',
+        nexaVoiceId: 'NV-RECIP',
+        username: 'recip',
+        displayName: 'Recipient',
+      });
+      mockPrisma.blockedUser.findFirst.mockResolvedValue(null);
+      mockPrisma.contactRelationship.findUnique.mockResolvedValue(null);
+      mockPrisma.contactRelationship.create.mockResolvedValue({
+        id: 'rel-new-1',
+        requesterId: 'user-req',
+        recipientId: 'user-recip',
+        status: ContactRelationshipStatus.PENDING,
+        createdAt: new Date(),
+        requester: { id: 'user-req', username: 'req', displayName: 'Req' },
+        recipient: { id: 'user-recip', username: 'recip', displayName: 'Recip' },
+      });
+
+      await service.sendContactRequest('user-req', { identifier: 'recip' });
+
+      expect(mockPrisma.outboxEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          eventType: 'contact.requested',
+          aggregateType: 'User',
+          aggregateId: 'user-recip',
+          status: 'PENDING',
+        }),
+      });
     });
   });
 });

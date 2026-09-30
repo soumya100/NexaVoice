@@ -6,36 +6,46 @@ import {
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
-import { StructuredLogger } from '../../infrastructure/observability/structured-logger.service';
+import { RequestPerformanceContext } from '../observability/request-performance.context';
 
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
-  private readonly logger = new StructuredLogger('HTTP');
-
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
-    const now = Date.now();
     const type = context.getType<'http' | 'ws' | 'graphql'>();
 
     if (type === 'http') {
       const request = context.switchToHttp().getRequest();
+      const response = context.switchToHttp().getResponse();
       const method = request.method;
       const url = request.url;
-      const ip = request.ip;
 
-      return next.handle().pipe(
-        tap(() => {
-          const response = context.switchToHttp().getResponse();
-          const statusCode = response.statusCode;
-          const duration = Date.now() - now;
-          this.logger.log({
-            method,
-            url,
-            statusCode,
-            durationMs: duration,
-            ip,
-          });
-        }),
+      const perfCtx = new RequestPerformanceContext(
+        url,
+        request.body?.operationName || method,
+        method,
+        request.headers['x-request-id'],
       );
+      request._perf = perfCtx;
+
+      return new Observable((subscriber) => {
+        RequestPerformanceContext.run(perfCtx, () => {
+          next
+            .handle()
+            .pipe(
+              tap({
+                next: () => {
+                  perfCtx.statusCode = response.statusCode;
+                  perfCtx.finalize(response);
+                },
+                error: (err) => {
+                  perfCtx.statusCode = err.status || 500;
+                  perfCtx.finalize(response);
+                },
+              }),
+            )
+            .subscribe(subscriber);
+        });
+      });
     }
 
     return next.handle();

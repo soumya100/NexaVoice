@@ -5,6 +5,7 @@ export * from './calling';
 export * from './ai';
 export * from './health';
 export * from './telephony';
+export * from './social';
 
 export {
   CallType,

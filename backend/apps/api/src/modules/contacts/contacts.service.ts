@@ -14,10 +14,15 @@ import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { SecurityAuditService } from '../security/security-audit.service';
 import {
   AddressBookMatchResultGql,
+  AddContactToGroupInput,
   BlockedUserEntryGql,
   ContactDiscoveryResultGql,
+  ContactGroupGql,
   ContactRelationshipGql,
   ContactRequestGql,
+  CreateContactGroupInput,
+  OrganizationDirectoryInput,
+  OrganizationMemberGql,
   SendContactRequestInput,
   SyncAddressBookInput,
   UpdatePrivacySettingsInput,
@@ -158,15 +163,26 @@ export class ContactsService {
   /**
    * Lists accepted contacts for a user.
    */
+  /**
+   * Lists accepted contacts for a user with targeted projection.
+   */
   async getContacts(userId: string): Promise<ContactRelationshipGql[]> {
+    const contactUserSelect = {
+      id: true,
+      nexaVoiceId: true,
+      username: true,
+      displayName: true,
+      avatarUrl: true,
+    };
+
     const relationships = await this.prisma.contactRelationship.findMany({
       where: {
         status: ContactRelationshipStatus.ACCEPTED,
         OR: [{ requesterId: userId }, { recipientId: userId }],
       },
       include: {
-        requester: true,
-        recipient: true,
+        requester: { select: contactUserSelect },
+        recipient: { select: contactUserSelect },
       },
       orderBy: { updatedAt: 'desc' },
     });
@@ -194,12 +210,20 @@ export class ContactsService {
   }
 
   /**
-   * Lists pending contact requests.
+   * Lists pending contact requests with targeted projection.
    */
   async getContactRequests(
     userId: string,
     filter: 'incoming' | 'outgoing' | 'all' = 'all',
   ): Promise<ContactRequestGql[]> {
+    const contactUserSelect = {
+      id: true,
+      nexaVoiceId: true,
+      username: true,
+      displayName: true,
+      avatarUrl: true,
+    };
+
     const whereClause: Record<string, unknown> = {
       status: ContactRelationshipStatus.PENDING,
     };
@@ -215,8 +239,8 @@ export class ContactsService {
     const requests = await this.prisma.contactRelationship.findMany({
       where: whereClause,
       include: {
-        requester: true,
-        recipient: true,
+        requester: { select: contactUserSelect },
+        recipient: { select: contactUserSelect },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -433,6 +457,21 @@ export class ContactsService {
       result: 'SUCCESS',
     });
 
+    await this.prisma.outboxEvent.create({
+      data: {
+        eventType: 'contact.requested',
+        aggregateType: 'User',
+        aggregateId: recipient.id,
+        payloadJson: JSON.stringify({
+          requestId: created.id,
+          requesterId,
+          recipientId: recipient.id,
+        }),
+        status: 'PENDING',
+        correlationId: created.id,
+      },
+    });
+
     return {
       id: created.id,
       requesterId: created.requesterId,
@@ -501,6 +540,20 @@ export class ContactsService {
       targetType: 'User',
       targetId: request.requesterId,
       result: 'SUCCESS',
+    });
+
+    await this.prisma.outboxEvent.create({
+      data: {
+        eventType: 'contact.accepted',
+        aggregateType: 'User',
+        aggregateId: request.requesterId,
+        payloadJson: JSON.stringify({
+          requestId: updated.id,
+          contactUserId: userId,
+        }),
+        status: 'PENDING',
+        correlationId: updated.id,
+      },
     });
 
     const contactUser = updated.requester;
@@ -583,6 +636,20 @@ export class ContactsService {
       result: 'SUCCESS',
     });
 
+    await this.prisma.outboxEvent.create({
+      data: {
+        eventType: 'contact.removed',
+        aggregateType: 'User',
+        aggregateId: contactUserId,
+        payloadJson: JSON.stringify({
+          userId,
+          contactUserId,
+        }),
+        status: 'PENDING',
+        correlationId: relationship.id,
+      },
+    });
+
     return true;
   }
 
@@ -614,6 +681,19 @@ export class ContactsService {
         data: {
           status: ContactRelationshipStatus.BLOCKED,
           blockedAt: new Date(),
+        },
+      });
+
+      await tx.outboxEvent.create({
+        data: {
+          eventType: 'contact.blocked',
+          aggregateType: 'User',
+          aggregateId: blockedUserId,
+          payloadJson: JSON.stringify({
+            blockerId,
+            blockedUserId,
+          }),
+          status: 'PENDING',
         },
       });
     });
@@ -857,5 +937,290 @@ export class ContactsService {
     });
 
     return matchResults;
+  }
+
+  /**
+   * Creates a user-defined contact group (e.g. Favorites, Team, Clients).
+   */
+  async createContactGroup(
+    userId: string,
+    input: CreateContactGroupInput,
+  ): Promise<ContactGroupGql> {
+    const name = input.name.trim();
+    if (!name) {
+      throw new BadRequestException('Contact group name cannot be empty');
+    }
+
+    const existing = await this.prisma.contactGroup.findUnique({
+      where: {
+        userId_name: { userId, name },
+      },
+    });
+
+    if (existing) {
+      throw new ConflictException(`Contact group '${name}' already exists`);
+    }
+
+    const group = await this.prisma.contactGroup.create({
+      data: {
+        userId,
+        name,
+        color: input.color,
+      },
+      include: {
+        members: {
+          include: { contactUser: true },
+        },
+      },
+    });
+
+    return this.mapContactGroup(group);
+  }
+
+  /**
+   * Retrieves all contact groups for a user.
+   */
+  async getContactGroups(userId: string): Promise<ContactGroupGql[]> {
+    const groups = await this.prisma.contactGroup.findMany({
+      where: { userId },
+      include: {
+        members: {
+          include: { contactUser: true },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return groups.map((g) => this.mapContactGroup(g));
+  }
+
+  /**
+   * Adds a contact to a group.
+   */
+  async addContactToGroup(
+    userId: string,
+    input: AddContactToGroupInput,
+  ): Promise<ContactGroupGql> {
+    const group = await this.prisma.contactGroup.findUnique({
+      where: { id: input.groupId },
+    });
+
+    if (!group || group.userId !== userId) {
+      throw new NotFoundException('Contact group not found');
+    }
+
+    // Verify target user is an accepted contact
+    const contact = await this.prisma.contactRelationship.findFirst({
+      where: {
+        status: ContactRelationshipStatus.ACCEPTED,
+        OR: [
+          { requesterId: userId, recipientId: input.contactUserId },
+          { requesterId: input.contactUserId, recipientId: userId },
+        ],
+      },
+    });
+
+    if (!contact) {
+      throw new BadRequestException('User must be an accepted contact before adding to a group');
+    }
+
+    await this.prisma.contactGroupMember.upsert({
+      where: {
+        groupId_contactUserId: {
+          groupId: input.groupId,
+          contactUserId: input.contactUserId,
+        },
+      },
+      create: {
+        groupId: input.groupId,
+        contactUserId: input.contactUserId,
+      },
+      update: {},
+    });
+
+    const updated = await this.prisma.contactGroup.findUniqueOrThrow({
+      where: { id: input.groupId },
+      include: {
+        members: {
+          include: { contactUser: true },
+        },
+      },
+    });
+
+    return this.mapContactGroup(updated);
+  }
+
+  /**
+   * Removes a contact from a group.
+   */
+  async removeContactFromGroup(
+    userId: string,
+    groupId: string,
+    contactUserId: string,
+  ): Promise<ContactGroupGql> {
+    const group = await this.prisma.contactGroup.findUnique({
+      where: { id: groupId },
+    });
+
+    if (!group || group.userId !== userId) {
+      throw new NotFoundException('Contact group not found');
+    }
+
+    await this.prisma.contactGroupMember.deleteMany({
+      where: {
+        groupId,
+        contactUserId,
+      },
+    });
+
+    const updated = await this.prisma.contactGroup.findUniqueOrThrow({
+      where: { id: groupId },
+      include: {
+        members: {
+          include: { contactUser: true },
+        },
+      },
+    });
+
+    return this.mapContactGroup(updated);
+  }
+
+  /**
+   * Deletes a contact group.
+   */
+  async deleteContactGroup(userId: string, groupId: string): Promise<boolean> {
+    const group = await this.prisma.contactGroup.findUnique({
+      where: { id: groupId },
+    });
+
+    if (!group || group.userId !== userId) {
+      throw new NotFoundException('Contact group not found');
+    }
+
+    await this.prisma.contactGroup.delete({
+      where: { id: groupId },
+    });
+
+    return true;
+  }
+
+  /**
+   * Toggles favorite status for a contact.
+   */
+  async toggleFavorite(userId: string, contactUserId: string): Promise<boolean> {
+    let favoritesGroup = await this.prisma.contactGroup.findUnique({
+      where: {
+        userId_name: { userId, name: 'Favorites' },
+      },
+    });
+
+    if (!favoritesGroup) {
+      favoritesGroup = await this.prisma.contactGroup.create({
+        data: {
+          userId,
+          name: 'Favorites',
+          color: '#eab308',
+        },
+      });
+    }
+
+    const existingMember = await this.prisma.contactGroupMember.findUnique({
+      where: {
+        groupId_contactUserId: {
+          groupId: favoritesGroup.id,
+          contactUserId,
+        },
+      },
+    });
+
+    if (existingMember) {
+      await this.prisma.contactGroupMember.delete({
+        where: { id: existingMember.id },
+      });
+      return false;
+    } else {
+      await this.addContactToGroup(userId, {
+        groupId: favoritesGroup.id,
+        contactUserId,
+      });
+      return true;
+    }
+  }
+
+  /**
+   * Organization Directory: returns members of the caller's organization.
+   */
+  async getOrganizationDirectory(
+    callerId: string,
+    input?: OrganizationDirectoryInput,
+  ): Promise<OrganizationMemberGql[]> {
+    const caller = await this.prisma.user.findUnique({
+      where: { id: callerId },
+      select: { organizationId: true },
+    });
+
+    const orgId = input?.organizationId || caller?.organizationId || 'org_default';
+
+    const whereClause: Record<string, unknown> = {
+      organizationId: orgId,
+      accountState: 'ACTIVE',
+    };
+
+    if (input?.department) {
+      whereClause['department'] = { equals: input.department, mode: 'insensitive' };
+    }
+
+    if (input?.search) {
+      const clean = input.search.trim();
+      whereClause['OR'] = [
+        { displayName: { contains: clean, mode: 'insensitive' } },
+        { username: { contains: clean, mode: 'insensitive' } },
+        { department: { contains: clean, mode: 'insensitive' } },
+        { jobTitle: { contains: clean, mode: 'insensitive' } },
+      ];
+    }
+
+    const members = await this.prisma.user.findMany({
+      where: whereClause,
+      take: Math.min(input?.limit || 50, 100),
+      skip: input?.offset || 0,
+      orderBy: [{ department: 'asc' }, { displayName: 'asc' }],
+    });
+
+    return members.map((m) => ({
+      userId: m.id,
+      organizationId: m.organizationId || orgId,
+      displayName: m.displayName,
+      username: m.username,
+      email: m.email || undefined,
+      department: m.department || undefined,
+      jobTitle: m.jobTitle || undefined,
+      avatarUrl: m.avatarUrl || undefined,
+      status: m.status,
+    }));
+  }
+
+  private mapContactGroup(group: any): ContactGroupGql {
+    return {
+      id: group.id,
+      userId: group.userId,
+      name: group.name,
+      color: group.color || undefined,
+      memberCount: group.members?.length || 0,
+      members: (group.members || []).map((m: any) => ({
+        id: m.id,
+        contactUserId: m.contactUserId,
+        addedAt: m.addedAt.toISOString(),
+        contactUser: {
+          id: m.contactUser.id,
+          nexaVoiceId: m.contactUser.nexaVoiceId,
+          username: m.contactUser.username,
+          displayName: m.contactUser.displayName,
+          avatarUrl: m.contactUser.avatarUrl || undefined,
+        },
+      })),
+      createdAt: group.createdAt.toISOString(),
+      updatedAt: group.updatedAt.toISOString(),
+    };
   }
 }

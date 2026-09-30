@@ -85,6 +85,26 @@ enum ReportStatus {
   DISMISSED
 }
 
+enum NotificationType {
+  MESSAGE
+  MISSED_CALL
+  CALL_INCOMING
+  CONTACT_REQUEST
+  CONTACT_ACCEPTED
+  ROOM_INVITE
+  MEETING_SCHEDULED
+  MENTION
+  AI_SUMMARY
+  SYSTEM
+}
+
+enum NotificationPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
 enum CallType {
   VOICE
   VIDEO
@@ -336,10 +356,22 @@ model User {
   attachments             Attachment[]
   filedReports            MessageReport[]       @relation("FiledReports")
 
+  organizationId          String?                   @default("org_default")
+  department              String?
+  jobTitle                String?
+  timezone                String?                   @default("UTC")
+  locale                  String?                   @default("en-US")
+  contactGroups           ContactGroup[]
+  groupMemberships        ContactGroupMember[]      @relation("UserGroupMemberships")
+  notifications           Notification[]            @relation("UserNotifications")
+  actedNotifications      Notification[]            @relation("ActorNotifications")
+  notificationPreferences NotificationPreference?
+
   @@index([username])
   @@index([nexaVoiceId])
   @@index([email])
   @@index([accountState])
+  @@index([organizationId])
 }
 
 model UserPrivacySettings {
@@ -353,6 +385,7 @@ model UserPrivacySettings {
   whoCanAddMeToGroups       PrivacyLevel @default(EVERYONE)
   readReceiptsEnabled       Boolean      @default(true)
   typingIndicatorsEnabled   Boolean      @default(true)
+  presenceVisibility        PrivacyLevel @default(EVERYONE)
   createdAt                 DateTime     @default(now())
   updatedAt                 DateTime     @updatedAt
 
@@ -377,6 +410,8 @@ model ContactRelationship {
   @@index([requesterId])
   @@index([recipientId])
   @@index([status])
+  @@index([requesterId, status])
+  @@index([recipientId, status])
 }
 
 model BlockedUser {
@@ -415,6 +450,7 @@ model Conversation {
   @@unique([directUserAId, directUserBId])
   @@index([type])
   @@index([lastMessageAt])
+  @@index([updatedAt])
 }
 
 model ConversationParticipant {
@@ -429,6 +465,8 @@ model ConversationParticipant {
   lastReadAt              DateTime?
   isMuted                 Boolean          @default(false)
   muteUntil               DateTime?
+  isArchived              Boolean          @default(false)
+  isFavorite              Boolean          @default(false)
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -516,6 +554,76 @@ model MessageReport {
 
   @@index([reporterId])
   @@index([status])
+}
+
+model ContactGroup {
+  id        String               @id @default(uuid())
+  userId    String
+  name      String
+  color     String?
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  user    User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  members ContactGroupMember[]
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model ContactGroupMember {
+  id            String       @id @default(uuid())
+  groupId       String
+  contactUserId String
+  addedAt       DateTime     @default(now())
+
+  group       ContactGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  contactUser User         @relation("UserGroupMemberships", fields: [contactUserId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, contactUserId])
+  @@index([groupId])
+  @@index([contactUserId])
+}
+
+model Notification {
+  id        String               @id @default(uuid())
+  userId    String
+  actorId   String?
+  type      NotificationType
+  title     String
+  body      String
+  priority  NotificationPriority @default(NORMAL)
+  dataJson  String?              @default("{}")
+  isRead    Boolean              @default(false)
+  readAt    DateTime?
+  createdAt DateTime             @default(now())
+
+  user  User  @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  actor User? @relation("ActorNotifications", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+}
+
+model NotificationPreference {
+  id                   String    @id @default(uuid())
+  userId               String    @unique
+  messagesInApp        Boolean   @default(true)
+  messagesEmail        Boolean   @default(false)
+  callsInApp           Boolean   @default(true)
+  callsEmail           Boolean   @default(true)
+  contactRequestsInApp Boolean   @default(true)
+  contactRequestsEmail Boolean   @default(false)
+  mentionsInApp        Boolean   @default(true)
+  mentionsEmail        Boolean   @default(true)
+  aiSummariesInApp     Boolean   @default(true)
+  aiSummariesEmail     Boolean   @default(false)
+  globalMute           Boolean   @default(false)
+  muteUntil            DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Role {

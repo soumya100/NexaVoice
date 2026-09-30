@@ -4,6 +4,16 @@ import { PrismaService } from '../../infrastructure/database/prisma.service';
 import { StructuredLogger } from '../../infrastructure/observability/structured-logger.service';
 import { SecurityAuditService } from '../security/security-audit.service';
 
+let userAuthCacheInvalidator: (userId: string) => void = () => {};
+
+export function registerAuthCacheInvalidator(fn: (userId: string) => void): void {
+  userAuthCacheInvalidator = fn;
+}
+
+export function invalidateUserAuthCache(userId: string): void {
+  userAuthCacheInvalidator(userId);
+}
+
 /**
  * Default role-to-permission baseline mappings.
  */
@@ -180,36 +190,40 @@ export class RbacService implements OnModuleInit {
       };
     }
 
-    const assignments = await this.prisma.userRoleAssignment.findMany({
-      where: { userId },
-      include: {
-        role: {
-          include: {
-            permissions: {
-              include: { permission: true },
-            },
-          },
-        },
-      },
-    });
+    // Optimize role and permission resolution into a single raw SQL join
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        roleName: string | null;
+        permissionAction: string | null;
+      }>
+    >`
+      SELECT 
+        r.name as "roleName",
+        p.action as "permissionAction"
+      FROM "UserRoleAssignment" ura
+      JOIN "Role" r ON r.id = ura."roleId"
+      LEFT JOIN "RolePermission" rp ON rp."roleId" = r.id
+      LEFT JOIN "Permission" p ON p.id = rp."permissionId"
+      WHERE ura."userId" = ${userId}
+    `;
 
     const rolesSet = new Set<string>();
     const permissionsSet = new Set<string>();
 
-    // If user has no specific assignments, ensure standard USER role
-    if (assignments.length === 0) {
+    if (rows.length === 0) {
       rolesSet.add(SystemRole.USER);
       (ROLE_PERMISSIONS_MAP[SystemRole.USER] || []).forEach((p) => permissionsSet.add(p));
     } else {
-      for (const assignment of assignments) {
-        rolesSet.add(assignment.role.name);
-        for (const rp of assignment.role.permissions) {
-          permissionsSet.add(rp.permission.action);
+      for (const row of rows) {
+        if (row.roleName) {
+          rolesSet.add(row.roleName);
+          const baseline = ROLE_PERMISSIONS_MAP[row.roleName as SystemRole];
+          if (baseline) {
+            baseline.forEach((p) => permissionsSet.add(p));
+          }
         }
-        // Baseline guarantee for system roles
-        const baseline = ROLE_PERMISSIONS_MAP[assignment.role.name as SystemRole];
-        if (baseline) {
-          baseline.forEach((p) => permissionsSet.add(p));
+        if (row.permissionAction) {
+          permissionsSet.add(row.permissionAction);
         }
       }
     }
@@ -244,6 +258,8 @@ export class RbacService implements OnModuleInit {
       update: {},
     });
 
+    invalidateUserAuthCache(userId);
+
     await this.securityAudit.logEvent({
       actorId: assignedBy,
       action: 'ROLE_ASSIGNED',
@@ -264,6 +280,8 @@ export class RbacService implements OnModuleInit {
     await this.prisma.userRoleAssignment.deleteMany({
       where: { userId, roleId: role.id },
     });
+
+    invalidateUserAuthCache(userId);
 
     await this.securityAudit.logEvent({
       actorId: revokedBy,

@@ -67,6 +67,13 @@ describe('CallingService', () => {
       outboxEvent: {
         create: jest.fn(),
       },
+      message: {
+        create: jest.fn().mockImplementation(async ({ data }: any) => ({
+          id: `msg-${Date.now()}`,
+          ...data,
+          createdAt: new Date(),
+        })),
+      },
     };
 
     mockStateMachine = {
@@ -336,4 +343,82 @@ describe('CallingService', () => {
       );
     });
   });
+
+  describe('conversation-linked calling', () => {
+    it('creates CALL_EVENT message in conversation when call is initiated with conversationId', async () => {
+      mockPrisma.callSession.create.mockResolvedValueOnce({
+        id: 'call-conv-1',
+        callType: 'VOICE',
+        status: 'NEW',
+        hostUserId: 'host-1',
+        conversationId: 'conv-123',
+        startedAt: new Date(),
+      });
+
+      mockPrisma.callSession.findUnique.mockResolvedValueOnce({
+        id: 'call-conv-1',
+        callType: 'VOICE',
+        status: 'NEW',
+        hostUserId: 'host-1',
+        conversationId: 'conv-123',
+        startedAt: new Date(),
+        participants: [
+          {
+            id: 'p-host',
+            userId: 'host-1',
+            role: 'HOST',
+            state: 'CONNECTED',
+            canMuteOthers: true,
+            canRemoveParticipants: true,
+            canInviteParticipants: true,
+            canShareScreen: true,
+            canRecord: true,
+            canEndCall: true,
+            joinedAt: new Date(),
+            createdAt: new Date(),
+            legs: [],
+          },
+        ],
+        legs: [],
+        mediaSessions: [],
+        invitations: [],
+      });
+
+      await service.initiateCall('host-1', {
+        callType: 'VOICE' as any,
+        inviteeUserIds: ['user-2'],
+        conversationId: 'conv-123',
+      });
+
+      expect(mockPrisma.message.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          conversationId: 'conv-123',
+          senderId: 'host-1',
+          type: 'CALL_EVENT',
+          content: expect.stringContaining('CALL_STARTED'),
+        }),
+      });
+    });
+
+    it('creates CALL_EVENT message in conversation when call with conversationId is ended', async () => {
+      mockPrisma.callSession.findUnique.mockResolvedValueOnce({
+        id: 'call-1',
+        conversationId: 'conv-123',
+        startedAt: new Date(Date.now() - 30000),
+        status: 'ACTIVE',
+      });
+
+      await service.endCall('host-1', 'call-1', 'NORMAL_CLEARING');
+
+      expect(mockPrisma.message.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          conversationId: 'conv-123',
+          senderId: 'host-1',
+          type: 'CALL_EVENT',
+          content: expect.stringContaining('CALL_ENDED'),
+        }),
+      });
+    });
+  });
 });
+

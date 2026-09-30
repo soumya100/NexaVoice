@@ -24,6 +24,7 @@ describe('JwtAuthGuard - Security and Fail-Closed Validation', () => {
   };
 
   beforeEach(() => {
+    JwtAuthGuard.clearCache();
     reflector = {
       getAllAndOverride: jest.fn().mockReturnValue(false),
     } as unknown as Reflector;

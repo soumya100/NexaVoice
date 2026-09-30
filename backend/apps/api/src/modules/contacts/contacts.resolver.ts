@@ -7,10 +7,15 @@ import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { ContactsService } from './contacts.service';
 import {
   AddressBookMatchResultGql,
+  AddContactToGroupInput,
   BlockedUserEntryGql,
   ContactDiscoveryResultGql,
+  ContactGroupGql,
   ContactRelationshipGql,
   ContactRequestGql,
+  CreateContactGroupInput,
+  OrganizationDirectoryInput,
+  OrganizationMemberGql,
   SendContactRequestInput,
   SyncAddressBookInput,
   UpdatePrivacySettingsInput,
@@ -138,5 +143,68 @@ export class ContactsResolver {
     @Args('input') input: SyncAddressBookInput,
   ): Promise<AddressBookMatchResultGql[]> {
     return this.contactsService.syncAddressBook(user.id, input);
+  }
+
+  @Query(() => [ContactGroupGql], { description: 'Get all contact groups for current user' })
+  @RequirePermissions(PermissionAction.CONTACT_READ)
+  async contactGroups(
+    @CurrentUser() user: AuthorizationSubject,
+  ): Promise<ContactGroupGql[]> {
+    return this.contactsService.getContactGroups(user.id);
+  }
+
+  @Mutation(() => ContactGroupGql, { description: 'Create a new contact group' })
+  @RequirePermissions(PermissionAction.CONTACT_MANAGE)
+  async createContactGroup(
+    @CurrentUser() user: AuthorizationSubject,
+    @Args('input') input: CreateContactGroupInput,
+  ): Promise<ContactGroupGql> {
+    return this.contactsService.createContactGroup(user.id, input);
+  }
+
+  @Mutation(() => ContactGroupGql, { description: 'Add a contact to a group' })
+  @RequirePermissions(PermissionAction.CONTACT_MANAGE)
+  async addContactToGroup(
+    @CurrentUser() user: AuthorizationSubject,
+    @Args('input') input: AddContactToGroupInput,
+  ): Promise<ContactGroupGql> {
+    return this.contactsService.addContactToGroup(user.id, input);
+  }
+
+  @Mutation(() => ContactGroupGql, { description: 'Remove a contact from a group' })
+  @RequirePermissions(PermissionAction.CONTACT_MANAGE)
+  async removeContactFromGroup(
+    @CurrentUser() user: AuthorizationSubject,
+    @Args('groupId') groupId: string,
+    @Args('contactUserId') contactUserId: string,
+  ): Promise<ContactGroupGql> {
+    return this.contactsService.removeContactFromGroup(user.id, groupId, contactUserId);
+  }
+
+  @Mutation(() => Boolean, { description: 'Delete a contact group' })
+  @RequirePermissions(PermissionAction.CONTACT_MANAGE)
+  async deleteContactGroup(
+    @CurrentUser() user: AuthorizationSubject,
+    @Args('groupId') groupId: string,
+  ): Promise<boolean> {
+    return this.contactsService.deleteContactGroup(user.id, groupId);
+  }
+
+  @Mutation(() => Boolean, { description: 'Toggle favorite status for a contact' })
+  @RequirePermissions(PermissionAction.CONTACT_MANAGE)
+  async toggleFavoriteContact(
+    @CurrentUser() user: AuthorizationSubject,
+    @Args('contactUserId') contactUserId: string,
+  ): Promise<boolean> {
+    return this.contactsService.toggleFavorite(user.id, contactUserId);
+  }
+
+  @Query(() => [OrganizationMemberGql], { description: 'Get directory of organization members' })
+  @RequirePermissions(PermissionAction.CONTACT_READ)
+  async organizationDirectory(
+    @CurrentUser() user: AuthorizationSubject,
+    @Args('input', { nullable: true }) input?: OrganizationDirectoryInput,
+  ): Promise<OrganizationMemberGql[]> {
+    return this.contactsService.getOrganizationDirectory(user.id, input);
   }
 }

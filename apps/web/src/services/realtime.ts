@@ -297,7 +297,36 @@ export class RealtimeClient {
     socket.on('conversation.evicted', callback);
     return () => socket.off('conversation.evicted', callback);
   }
+
+  // ==========================================
+  // Milestone 8: Presence & Notifications
+  // ==========================================
+
+  sendPresenceHeartbeat(status?: string, customStatus?: string) {
+    if (this.socket && this.socket.connected) {
+      this.socket.emit('presence:heartbeat', { status, customStatus });
+    }
+  }
+
+  sendPresenceUpdate(status: string, customStatus?: string) {
+    if (this.socket && this.socket.connected) {
+      this.socket.emit('presence:update', { status, customStatus });
+    }
+  }
+
+  onPresenceUpdated(callback: (payload: any) => void): () => void {
+    const socket = this.connect();
+    socket.on('presence.updated', callback);
+    return () => socket.off('presence.updated', callback);
+  }
+
+  onNotificationCreated(callback: (payload: any) => void): () => void {
+    const socket = this.connect();
+    socket.on('notification.created', callback);
+    return () => socket.off('notification.created', callback);
+  }
 }
 
 export const realtimeService = new RealtimeClient();
 export const realtimeClient = realtimeService;
+

@@ -479,3 +479,196 @@ export async function uploadAttachmentFile(
     sizeBytes: file.size,
   };
 }
+
+// ==========================================
+// MILESTONE 8: PRESENCE, NOTIFICATIONS & GROUPS
+// ==========================================
+
+export const GET_MY_PRESENCE_QUERY = `
+  query GetMyPresence {
+    myPresence {
+      userId
+      status
+      customStatus
+      availability
+      lastSeenAt
+    }
+  }
+`;
+
+export const GET_USER_PRESENCE_QUERY = `
+  query GetUserPresence($userId: String!) {
+    userPresence(userId: $userId) {
+      userId
+      status
+      customStatus
+      availability
+      lastSeenAt
+    }
+  }
+`;
+
+export const UPDATE_PRESENCE_MUTATION = `
+  mutation UpdatePresence($input: UpdatePresenceInput!) {
+    updatePresence(input: $input) {
+      userId
+      status
+      customStatus
+      availability
+      lastSeenAt
+    }
+  }
+`;
+
+export const GET_NOTIFICATIONS_QUERY = `
+  query GetNotifications($limit: Int, $offset: Int, $unreadOnly: Boolean) {
+    notifications(limit: $limit, offset: $offset, unreadOnly: $unreadOnly) {
+      totalCount
+      unreadCount
+      items {
+        id
+        userId
+        actorId
+        actor {
+          id
+          displayName
+          username
+          avatarUrl
+        }
+        type
+        title
+        body
+        priority
+        dataJson
+        isRead
+        readAt
+        createdAt
+      }
+    }
+  }
+`;
+
+export const GET_UNREAD_NOTIFICATION_COUNT_QUERY = `
+  query GetUnreadNotificationCount {
+    unreadNotificationCount
+  }
+`;
+
+export const MARK_NOTIFICATION_READ_MUTATION = `
+  mutation MarkNotificationRead($id: ID!) {
+    markNotificationAsRead(id: $id) {
+      id
+      isRead
+      readAt
+    }
+  }
+`;
+
+export const MARK_ALL_NOTIFICATIONS_READ_MUTATION = `
+  mutation MarkAllNotificationsRead {
+    markAllNotificationsAsRead
+  }
+`;
+
+export const GET_NOTIFICATION_PREFERENCES_QUERY = `
+  query GetNotificationPreferences {
+    notificationPreferences {
+      id
+      userId
+      messagesInApp
+      messagesEmail
+      callsInApp
+      callsEmail
+      contactRequestsInApp
+      contactRequestsEmail
+      mentionsInApp
+      mentionsEmail
+      aiSummariesInApp
+      aiSummariesEmail
+      globalMute
+      muteUntil
+    }
+  }
+`;
+
+export const UPDATE_NOTIFICATION_PREFERENCES_MUTATION = `
+  mutation UpdateNotificationPreferences($input: UpdateNotificationPreferenceInput!) {
+    updateNotificationPreferences(input: $input) {
+      id
+      userId
+      messagesInApp
+      messagesEmail
+      callsInApp
+      callsEmail
+      contactRequestsInApp
+      contactRequestsEmail
+      mentionsInApp
+      mentionsEmail
+      aiSummariesInApp
+      aiSummariesEmail
+      globalMute
+      muteUntil
+    }
+  }
+`;
+
+export const GET_CONTACT_GROUPS_QUERY = `
+  query GetContactGroups {
+    contactGroups {
+      id
+      userId
+      name
+      color
+      createdAt
+      members {
+        id
+        groupId
+        contactUserId
+        addedAt
+        contactUser {
+          id
+          nexaVoiceId
+          username
+          displayName
+          avatarUrl
+          isOnline
+        }
+      }
+    }
+  }
+`;
+
+export const CREATE_CONTACT_GROUP_MUTATION = `
+  mutation CreateContactGroup($input: CreateContactGroupInput!) {
+    createContactGroup(input: $input) {
+      id
+      userId
+      name
+      color
+    }
+  }
+`;
+
+export const GET_ORGANIZATION_DIRECTORY_QUERY = `
+  query GetOrganizationDirectory($input: OrganizationDirectoryInput) {
+    organizationDirectory(input: $input) {
+      id
+      nexaVoiceId
+      username
+      displayName
+      avatarUrl
+      department
+      jobTitle
+      organizationId
+      presenceStatus
+      availability
+    }
+  }
+`;
+
+export const TOGGLE_FAVORITE_CONTACT_MUTATION = `
+  mutation ToggleFavoriteContact($contactUserId: String!, $isFavorite: Boolean!) {
+    toggleFavoriteContact(contactUserId: $contactUserId, isFavorite: $isFavorite)
+  }
+`;
+

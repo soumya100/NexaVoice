@@ -194,7 +194,24 @@ export class CallingService {
         },
       });
 
-      // 7. Transactional Outbox Event
+      // 7. If linked to a conversation, emit CALL_EVENT message
+      if (input.conversationId) {
+        await tx.message.create({
+          data: {
+            conversationId: input.conversationId,
+            senderId: hostUserId,
+            type: 'CALL_EVENT' as any,
+            content: JSON.stringify({
+              event: 'CALL_STARTED',
+              callId: call.id,
+              callType: input.callType,
+            }),
+            deliveryStatus: 'DELIVERED' as any,
+          },
+        });
+      }
+
+      // 8. Transactional Outbox Event
       await tx.outboxEvent.create({
         data: {
           eventType: 'call.created',
@@ -205,6 +222,7 @@ export class CallingService {
             hostUserId,
             callType: input.callType,
             inviteeUserIds: input.inviteeUserIds,
+            conversationId: input.conversationId,
           }),
           status: 'PENDING',
           correlationId: call.id,
@@ -666,13 +684,39 @@ export class CallingService {
         data: { status: 'CLOSED', closedAt: new Date() },
       });
 
-      // 5. Outbox Event
+      // 5. If linked to a conversation, emit CALL_EVENT message
+      if (call.conversationId) {
+        const durationSeconds = call.startedAt
+          ? Math.max(0, Math.round((Date.now() - new Date(call.startedAt).getTime()) / 1000))
+          : 0;
+        await tx.message.create({
+          data: {
+            conversationId: call.conversationId,
+            senderId: actorId,
+            type: 'CALL_EVENT' as any,
+            content: JSON.stringify({
+              event: 'CALL_ENDED',
+              callId: call.id,
+              durationSeconds,
+              reason: reason || 'NORMAL_CLEARING',
+            }),
+            deliveryStatus: 'DELIVERED' as any,
+          },
+        });
+      }
+
+      // 6. Outbox Event
       await tx.outboxEvent.create({
         data: {
           eventType: 'call.ended',
           aggregateType: 'CallSession',
           aggregateId: callId,
-          payloadJson: JSON.stringify({ callId, actorId, reason }),
+          payloadJson: JSON.stringify({
+            callId,
+            actorId,
+            reason,
+            conversationId: call.conversationId,
+          }),
           status: 'PENDING',
           correlationId: callId,
         },

@@ -10,11 +10,13 @@ import {
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { AccountState, AuthTokenPayload, PermissionAction } from '@nexavoice/domain-types';
+import { Inject, forwardRef } from '@nestjs/common';
+import { AccountState, AuthTokenPayload, PermissionAction, PresenceStatus } from '@nexavoice/domain-types';
 import { StructuredLogger } from '../../infrastructure/observability/structured-logger.service';
 import { RbacService } from '../authorization/rbac.service';
 import { AuthorizationDecisionService } from '../authorization/authorization-decision.service';
 import { PrismaService } from '../../infrastructure/database/prisma.service';
+import { PresenceService } from '../presence/presence.service';
 
 interface SignalingEventDto {
   callId: string;
@@ -44,6 +46,8 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     private readonly rbacService: RbacService,
     private readonly authDecisionService: AuthorizationDecisionService,
     private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => PresenceService))
+    private readonly presenceService: PresenceService,
   ) {}
 
   async handleConnection(client: Socket) {
@@ -128,6 +132,14 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
         nexaVoiceId: payload.nexaVoiceId,
         timestamp: new Date().toISOString(),
       });
+
+      // Register device connection with PresenceService
+      const deviceId = (client.handshake.query?.['deviceId'] as string) || client.id;
+      const deviceType = (client.handshake.query?.['deviceType'] as string) || 'WEB';
+      await this.presenceService.registerDeviceConnection(payload.sub, client.id, {
+        deviceId,
+        deviceType,
+      });
     } catch (err) {
       this.logger.warn({
         event: 'socket_authentication_failed',
@@ -149,6 +161,13 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
           this.userSockets.delete(clientData.userId);
         }
       }
+      this.presenceService.deregisterDeviceConnection(clientData.userId, client.id).catch((err) => {
+        this.logger.warn({
+          event: 'presence_deregister_failed',
+          socketId: client.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
     this.activeClients.delete(client.id);
 
@@ -325,6 +344,39 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   ) {
     client.leave(`conversation:${payload.conversationId}`);
     return { status: 'left', conversationId: payload.conversationId };
+  }
+
+  @SubscribeMessage('presence:heartbeat')
+  async handlePresenceHeartbeat(@ConnectedSocket() client: Socket) {
+    const clientData = this.activeClients.get(client.id);
+    if (!clientData) return { error: 'Unauthorized socket' };
+    const success = await this.presenceService.recordHeartbeat(clientData.userId, client.id);
+    return { status: success ? 'heartbeat_acknowledged' : 'heartbeat_ignored' };
+  }
+
+  @SubscribeMessage('presence:update')
+  async handlePresenceUpdate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { status: PresenceStatus; customStatus?: string },
+  ) {
+    const clientData = this.activeClients.get(client.id);
+    if (!clientData || !payload?.status) return { error: 'Invalid presence payload' };
+    const presence = await this.presenceService.updateStatus(
+      clientData.userId,
+      payload.status,
+      payload.customStatus,
+    );
+    return presence;
+  }
+
+  @SubscribeMessage('presence:query')
+  async handlePresenceQuery(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { userIds: string[] },
+  ) {
+    const clientData = this.activeClients.get(client.id);
+    if (!clientData || !Array.isArray(payload?.userIds)) return [];
+    return Promise.all(payload.userIds.map((uid) => this.presenceService.getUserPresence(uid)));
   }
 
   @SubscribeMessage('typing-start')

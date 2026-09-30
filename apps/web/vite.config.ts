@@ -16,26 +16,27 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
   },
   server: {
+    host: '0.0.0.0',
     port: 3000,
     proxy: {
       '/api': {
-        target: 'http://localhost:4000',
+        target: 'http://127.0.0.1:4000',
         changeOrigin: true,
       },
       '/health': {
-        target: 'http://localhost:4000',
+        target: 'http://127.0.0.1:4000',
         changeOrigin: true,
       },
       '/graphql': {
-        target: 'http://localhost:4000',
+        target: 'http://127.0.0.1:4000',
         changeOrigin: true,
       },
       '/realtime': {
-        target: 'http://localhost:4000',
+        target: 'http://127.0.0.1:4000',
         ws: true,
       },
       '/socket.io': {
-        target: 'http://localhost:4000',
+        target: 'http://127.0.0.1:4000',
         ws: true,
       },
     },

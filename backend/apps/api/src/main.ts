@@ -50,8 +50,8 @@ async function bootstrap() {
   // Graceful shutdown hooks
   app.enableShutdownHooks();
 
-  await app.listen(port);
-  logger.log(`NexaVoice API started on http://localhost:${port}`);
+  await app.listen(port, '0.0.0.0');
+  logger.log(`NexaVoice API started on http://0.0.0.0:${port}`);
   logger.log(`GraphQL Playground available at http://localhost:${port}/graphql`);
   logger.log(`Health Check endpoints at http://localhost:${port}/health/live and /health/ready`);
 }

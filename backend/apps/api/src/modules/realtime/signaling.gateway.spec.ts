@@ -7,6 +7,7 @@ describe('SignalingGateway', () => {
   let mockRbacService: any;
   let mockAuthDecisionService: any;
   let mockPrisma: any;
+  let mockPresenceService: any;
 
   beforeEach(() => {
     mockJwtService = {
@@ -20,6 +21,13 @@ describe('SignalingGateway', () => {
     };
     mockAuthDecisionService = {
       authorize: jest.fn(),
+    };
+    mockPresenceService = {
+      getUserPresence: jest.fn(),
+      registerDeviceConnection: jest.fn().mockResolvedValue({ isOnline: true }),
+      deregisterDeviceConnection: jest.fn().mockResolvedValue({ isOnline: false }),
+      recordHeartbeat: jest.fn().mockResolvedValue(true),
+      updateStatus: jest.fn().mockResolvedValue({ isOnline: true }),
     };
     mockPrisma = {
       isDatabaseConnected: jest.fn().mockReturnValue(true),
@@ -43,6 +51,7 @@ describe('SignalingGateway', () => {
       mockRbacService,
       mockAuthDecisionService,
       mockPrisma,
+      mockPresenceService,
     );
   });
 

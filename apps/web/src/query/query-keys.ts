@@ -25,6 +25,9 @@ export const contactKeys = {
   list: () => [...contactKeys.all, 'list'] as const,
   requests: () => [...contactKeys.all, 'requests'] as const,
   blocked: () => [...contactKeys.all, 'blocked'] as const,
+  groups: () => [...contactKeys.all, 'groups'] as const,
+  directory: (filters?: { department?: string; jobTitle?: string; search?: string }) =>
+    [...contactKeys.all, 'directory', filters ?? {}] as const,
 };
 
 export const healthKeys = {
@@ -131,4 +134,27 @@ export const summaryKeys = {
 export const actionItemKeys = {
   all: ['actionItems'] as const,
   forCall: (callId: string) => [...actionItemKeys.all, 'call', callId] as const,
+};
+
+// ==========================================
+// MILESTONE 8: SOCIAL, PRESENCE & NOTIFICATIONS
+// ==========================================
+
+export const presenceKeys = {
+  all: ['presence'] as const,
+  me: () => [...presenceKeys.all, 'me'] as const,
+  user: (userId: string) => [...presenceKeys.all, 'user', userId] as const,
+};
+
+export const notificationKeys = {
+  all: ['notifications'] as const,
+  list: (filters?: { limit?: number; offset?: number; unreadOnly?: boolean }) =>
+    [...notificationKeys.all, 'list', filters ?? {}] as const,
+  unreadCount: () => [...notificationKeys.all, 'unreadCount'] as const,
+  preferences: () => [...notificationKeys.all, 'preferences'] as const,
+};
+
+export const profileKeys = {
+  all: ['profile'] as const,
+  privacy: () => [...profileKeys.all, 'privacy'] as const,
 };

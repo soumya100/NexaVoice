@@ -18,6 +18,9 @@ import { CallingModule } from './modules/calling/calling.module';
 import { TelephonyModule } from './modules/telephony/telephony.module';
 import { AIModule } from './modules/ai/ai.module';
 import { EmailModule } from './modules/email/email.module';
+import { PresenceModule } from './modules/presence/presence.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { ApolloPerformancePlugin } from './common/observability/apollo-performance.plugin';
 
 @Module({
   imports: [
@@ -35,6 +38,8 @@ import { EmailModule } from './modules/email/email.module';
     CallingModule,
     TelephonyModule,
     AIModule,
+    PresenceModule,
+    NotificationsModule,
     RealtimeModule,
     HealthModule,
     GraphQLModule.forRootAsync<ApolloDriverConfig>({
@@ -46,9 +51,11 @@ import { EmailModule } from './modules/email/email.module';
         introspection: true,
         path: '/graphql',
         context: ({ req, res }: { req: unknown; res: unknown }) => ({ req, res }),
+        plugins: [new ApolloPerformancePlugin()],
       }),
       inject: [ConfigService],
     }),
   ],
+  providers: [ApolloPerformancePlugin],
 })
 export class AppModule {}

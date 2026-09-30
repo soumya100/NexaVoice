@@ -2,6 +2,7 @@ import { Injectable, Optional, OnModuleDestroy, OnModuleInit } from '@nestjs/com
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '@prisma/client';
 import { StructuredLogger } from '../observability/structured-logger.service';
+import { RequestPerformanceContext } from '../../common/observability/request-performance.context';
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
@@ -13,6 +14,20 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       configService?.get<string>('database.url') ||
       process.env.DATABASE_URL;
     super(dbUrl ? { datasources: { db: { url: dbUrl } } } : undefined);
+
+    // Instrument database execution time and query counting
+    if (typeof (this as any).$use === 'function') {
+      (this as any).$use(async (params: any, next: (params: any) => Promise<any>) => {
+        const before = performance.now();
+        const result = await next(params);
+        const duration = performance.now() - before;
+        const perfCtx = RequestPerformanceContext.current();
+        if (perfCtx) {
+          perfCtx.recordDb(duration);
+        }
+        return result;
+      });
+    }
   }
 
   async onModuleInit() {

@@ -223,3 +223,112 @@ export class AddressBookMatchResultGql {
   @Field(() => ContactUserSummaryGql, { nullable: true })
   matchedUser?: ContactUserSummaryGql;
 }
+
+@ObjectType('ContactGroupMember')
+export class ContactGroupMemberGql {
+  @Field(() => ID)
+  id!: string;
+
+  @Field()
+  contactUserId!: string;
+
+  @Field()
+  addedAt!: string;
+
+  @Field(() => ContactUserSummaryGql)
+  contactUser!: ContactUserSummaryGql;
+}
+
+@ObjectType('ContactGroup')
+export class ContactGroupGql {
+  @Field(() => ID)
+  id!: string;
+
+  @Field()
+  userId!: string;
+
+  @Field()
+  name!: string;
+
+  @Field({ nullable: true })
+  color?: string;
+
+  @Field()
+  memberCount!: number;
+
+  @Field(() => [ContactGroupMemberGql], { nullable: true })
+  members?: ContactGroupMemberGql[];
+
+  @Field()
+  createdAt!: string;
+
+  @Field()
+  updatedAt!: string;
+}
+
+@InputType('CreateContactGroupInput')
+export class CreateContactGroupInput {
+  @Field()
+  name!: string;
+
+  @Field({ nullable: true })
+  color?: string;
+}
+
+@InputType('AddContactToGroupInput')
+export class AddContactToGroupInput {
+  @Field()
+  groupId!: string;
+
+  @Field()
+  contactUserId!: string;
+}
+
+@ObjectType('OrganizationMember')
+export class OrganizationMemberGql {
+  @Field(() => ID)
+  userId!: string;
+
+  @Field()
+  organizationId!: string;
+
+  @Field()
+  displayName!: string;
+
+  @Field()
+  username!: string;
+
+  @Field({ nullable: true })
+  email?: string;
+
+  @Field({ nullable: true })
+  department?: string;
+
+  @Field({ nullable: true })
+  jobTitle?: string;
+
+  @Field({ nullable: true })
+  avatarUrl?: string;
+
+  @Field({ nullable: true })
+  status?: string;
+}
+
+@InputType('OrganizationDirectoryInput')
+export class OrganizationDirectoryInput {
+  @Field({ nullable: true })
+  organizationId?: string;
+
+  @Field({ nullable: true })
+  search?: string;
+
+  @Field({ nullable: true })
+  department?: string;
+
+  @Field({ nullable: true })
+  limit?: number;
+
+  @Field({ nullable: true })
+  offset?: number;
+}
+

@@ -70,6 +70,31 @@ export class AIIntelligenceService {
     // Also extract action items
     await this.extractActionItems(callSessionId, dialogueText);
 
+    // If call was associated with a conversation, post AI_EVENT summary message
+    const callSession = await this.prisma.callSession.findUnique({
+      where: { id: callSessionId },
+      select: { conversationId: true, hostUserId: true },
+    });
+
+    if (callSession?.conversationId && (this.prisma as any).message?.create) {
+      await (this.prisma as any).message.create({
+        data: {
+          conversationId: callSession.conversationId,
+          senderId: callSession.hostUserId,
+          type: 'AI_EVENT' as any,
+          content: JSON.stringify({
+            event: 'AI_CALL_SUMMARY',
+            callSessionId,
+            summaryId: summary.id,
+            overview,
+            keyPoints,
+            sentiment,
+          }),
+          deliveryStatus: 'DELIVERED' as any,
+        },
+      });
+    }
+
     this.signalingGateway.broadcastToCall(callSessionId, 'ai.summary.generated', {
       callSessionId,
       summaryId: summary.id,

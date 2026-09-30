@@ -221,22 +221,29 @@ export class ConversationsService {
 
   /**
    * Lists all active conversations for the authenticated user.
+   * Single-query execution using relation filter to eliminate the 2-query waterfall,
+   * with targeted participant projection to eliminate excessive hydration.
    */
   async getUserConversations(userId: string): Promise<ConversationGql[]> {
-    const userMemberships = await this.prisma.conversationParticipant.findMany({
-      where: { userId },
-      select: { conversationId: true },
-    });
-
-    const conversationIds = userMemberships.map((m) => m.conversationId);
-
     const conversations = await this.prisma.conversation.findMany({
       where: {
-        id: { in: conversationIds },
+        participants: {
+          some: { userId },
+        },
       },
       include: {
         participants: {
-          include: { user: true },
+          include: {
+            user: {
+              select: {
+                id: true,
+                nexaVoiceId: true,
+                username: true,
+                displayName: true,
+                avatarUrl: true,
+              },
+            },
+          },
         },
         messages: {
           where: { deletedAt: null },
@@ -261,7 +268,17 @@ export class ConversationsService {
       where: { id: conversationId },
       include: {
         participants: {
-          include: { user: true },
+          include: {
+            user: {
+              select: {
+                id: true,
+                nexaVoiceId: true,
+                username: true,
+                displayName: true,
+                avatarUrl: true,
+              },
+            },
+          },
         },
       },
     });

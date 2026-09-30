@@ -30,7 +30,7 @@ import {
 } from 'lucide-react';
 import { AILayout } from '../features/ai/components/AILayout';
 import { RouterContext } from './context';
-import { MessagingWorkspace } from '../components/MessagingWorkspace';
+import { SocialWorkspace } from '../features/communication';
 import { useHealthReadyQuery } from '../query/hooks';
 import { authService } from '../services/auth';
 import { realtimeService } from '../services/realtime';
@@ -601,46 +601,26 @@ export const appIndexRoute = createRoute({
 export const conversationsRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: 'conversations',
-  component: () => <MessagingWorkspace />,
+  component: () => <SocialWorkspace initialTab="MESSAGES" />,
 });
 
 export const conversationDetailRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: 'conversations/$conversationId',
-  component: () => <MessagingWorkspace />,
+  component: ConversationDetailRouteComponent,
 });
+
+function ConversationDetailRouteComponent() {
+  const { conversationId } = conversationDetailRoute.useParams();
+  return <SocialWorkspace initialTab="MESSAGES" initialConversationId={conversationId} />;
+}
 
 export const contactsRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: 'contacts',
-  component: ContactsPageComponent,
+  component: () => <SocialWorkspace initialTab="CONTACTS" />,
 });
 
-function ContactsPageComponent() {
-  return (
-    <div style={{ padding: '32px', width: '100%', overflowY: 'auto' }}>
-      <h2 style={{ fontSize: '20px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <Users size={20} color="#3b82f6" /> Contacts & Address Book
-      </h2>
-      <p style={{ color: '#94a3b8', fontSize: '14px', marginBottom: '24px' }}>
-        Privacy-preserving contact matching using client-side SHA-256 phone/email hashes. Raw numbers are never persisted.
-      </p>
-      <div
-        style={{
-          background: '#1e293b',
-          borderRadius: '12px',
-          padding: '24px',
-          border: '1px solid rgba(255,255,255,0.06)',
-          maxWidth: '600px',
-        }}
-      >
-        <p style={{ margin: 0, color: '#e2e8f0', fontSize: '14px' }}>
-          Address-book discovery status: <strong style={{ color: '#10b981' }}>Active & Encrypted</strong>
-        </p>
-      </div>
-    </div>
-  );
-}
 
 export const callsRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
